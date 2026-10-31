@@ -50,8 +50,19 @@ impl Default for DownloadConfig {
     }
 }
 
+/// An artist-less fallback query shorter than this (in characters, once
+/// trimmed) is too generic to be worth a second search.
+const MIN_FALLBACK_QUERY_CHARS: usize = 3;
+
 #[derive(Debug, Clone)]
 struct SearchContext {
+    /// The slskd search currently backing this soulbeet search. It starts as
+    /// the soulbeet search id and changes when the fallback search starts.
+    slskd_id: String,
+    /// The artist-less query to try once if the search gets no responses at
+    /// all (Soulseek blocks some artists' names). `None` once used, or when
+    /// no useful fallback exists.
+    fallback_query: Option<String>,
     artist: String,
     album: Option<String>,
     track_titles: Vec<String>,
@@ -296,18 +307,48 @@ impl SoulseekClient {
         timeout: Duration,
         require_flac: bool,
     ) -> Result<String> {
-        self.wait_for_rate_limit().await?;
-
         let track_titles: Vec<String> = tracks.iter().map(|t| t.title.clone()).collect();
 
-        let query = match album {
+        let artist = album
+            .as_ref()
+            .map(|a| a.artist.clone())
+            .unwrap_or_else(|| tracks[0].artist.clone());
+        let subject = match album {
             Some(ref album) => match tracks.len() {
-                1 => format!("{} {}", album.artist.trim(), tracks[0].title.trim()),
-                _ => format!("{} {}", album.artist.trim(), album.title.trim()),
+                1 => tracks[0].title.as_str(),
+                _ => album.title.as_str(),
             },
             // No album, should be a single track search
-            None => format!("{} {}", tracks[0].artist.trim(), tracks[0].title.trim()),
+            None => tracks[0].title.as_str(),
         };
+        let query = search_query(&artist, subject);
+        let fallback_query = artistless_query(&artist, subject);
+
+        let search_id = self.post_search(&query, timeout).await?;
+
+        self.active_searches.lock().await.insert(
+            search_id.clone(),
+            SearchContext {
+                slskd_id: search_id.clone(),
+                fallback_query,
+                album: album.as_ref().map(|a| a.title.clone()),
+                artist,
+                track_titles,
+                start_time: Utc::now(),
+                timeout,
+                seen_response_count: 0,
+                require_flac,
+            },
+        );
+
+        info!("Search initiated with ID: {search_id}");
+        Ok(search_id)
+    }
+
+    /// Start one slskd search for `query`, honouring the search rate limit,
+    /// and return slskd's id for it.
+    async fn post_search(&self, query: &str, timeout: Duration) -> Result<String> {
+        self.wait_for_rate_limit().await?;
 
         info!(
             "Starting search for: '{}' with timeout {}ms",
@@ -324,7 +365,7 @@ impl SoulseekClient {
             minimum_peer_upload_speed: u32,
         }
         let request_body = SearchRequest {
-            search_text: &query,
+            search_text: query,
             timeout: timeout.num_milliseconds(),
             filter_responses: true,
             minimum_peer_upload_speed: 10,
@@ -337,26 +378,59 @@ impl SoulseekClient {
         let search_id_resp: SearchId = self
             .make_request(Method::POST, "searches", Some(&request_body))
             .await?;
-        let search_id = search_id_resp.id;
+        Ok(search_id_resp.id)
+    }
 
-        self.active_searches.lock().await.insert(
-            search_id.clone(),
-            SearchContext {
-                album: album.as_ref().map(|a| a.title.clone()),
-                artist: album
-                    .as_ref()
-                    .map(|a| a.artist.clone())
-                    .unwrap_or_else(|| tracks[0].artist.clone()),
-                track_titles,
-                start_time: Utc::now(),
-                timeout,
-                seen_response_count: 0,
-                require_flac,
-            },
+    /// Replace a search that finished with `response_count` responses by its
+    /// artist-less fallback, when `take_fallback` allows it. Returns whether
+    /// a fallback search is now running under `search_id`.
+    async fn start_fallback_search(
+        &self,
+        search_id: &str,
+        context: &SearchContext,
+        response_count: usize,
+    ) -> bool {
+        let query = {
+            let mut guard = self.active_searches.lock().await;
+            match guard.get_mut(search_id) {
+                Some(ctx) => take_fallback(ctx, response_count),
+                None => None,
+            }
+        };
+        let Some(query) = query else {
+            return false;
+        };
+
+        info!(
+            "Search {} got no responses; Soulseek may block the artist '{}', retrying as '{}'",
+            search_id, context.artist, query
         );
-
-        info!("Search initiated with ID: {search_id}");
-        Ok(search_id)
+        let _ = self.delete_search(&context.slskd_id).await;
+        match self.post_search(&query, context.timeout).await {
+            Ok(slskd_id) => {
+                let tracked = {
+                    let mut guard = self.active_searches.lock().await;
+                    match guard.get_mut(search_id) {
+                        Some(ctx) => {
+                            ctx.slskd_id = slskd_id.clone();
+                            ctx.start_time = Utc::now();
+                            ctx.seen_response_count = 0;
+                            true
+                        }
+                        None => false,
+                    }
+                };
+                if !tracked {
+                    // The search was dropped meanwhile; do not leak the new one.
+                    let _ = self.delete_search(&slskd_id).await;
+                }
+                tracked
+            }
+            Err(e) => {
+                warn!("Fallback search for {} failed to start: {}", search_id, e);
+                false
+            }
+        }
     }
 
     pub async fn poll_search(
@@ -381,11 +455,11 @@ impl SoulseekClient {
             if (Utc::now() - context.start_time) >= context.timeout {
                 info!("Search timeout reached");
                 self.active_searches.lock().await.remove(&search_id);
-                let _ = self.delete_search(&search_id).await;
+                let _ = self.delete_search(&context.slskd_id).await;
                 return Ok((vec![], false, SearchState::Completed));
             }
 
-            let endpoint = format!("searches/{}/responses", search_id);
+            let endpoint = format!("searches/{}/responses", context.slskd_id);
             match self
                 .make_request::<Vec<SearchResponse>, ()>(Method::GET, &endpoint, None)
                 .await
@@ -421,7 +495,7 @@ impl SoulseekClient {
                         if albums.len() > MAX_SEARCH_RESULTS {
                             albums.truncate(MAX_SEARCH_RESULTS);
                             self.active_searches.lock().await.remove(&search_id);
-                            let _ = self.delete_search(&search_id).await;
+                            let _ = self.delete_search(&context.slskd_id).await;
                             return Ok((albums, false, SearchState::Completed));
                         } else {
                             return Ok((albums, true, SearchState::InProgress));
@@ -431,9 +505,19 @@ impl SoulseekClient {
                         // responses stop arriving; once it reports completion
                         // there is nothing more to wait for, so return what we
                         // have instead of spinning until our own 120s timeout.
-                        if self.is_search_complete(&search_id).await {
+                        if self.is_search_complete(&context.slskd_id).await {
+                            // Zero responses (not zero matches) means
+                            // Soulseek likely blocked the query: retry once
+                            // without the artist and keep the poll going.
+                            if self
+                                .start_fallback_search(&search_id, &context, total_len)
+                                .await
+                            {
+                                return Ok((vec![], true, SearchState::InProgress));
+                            }
+
                             self.active_searches.lock().await.remove(&search_id);
-                            let _ = self.delete_search(&search_id).await;
+                            let _ = self.delete_search(&context.slskd_id).await;
 
                             let track_titles_ref: Vec<&str> =
                                 context.track_titles.iter().map(|s| s.as_str()).collect();
@@ -473,7 +557,7 @@ impl SoulseekClient {
                 Err(e) => {
                     // Clean up search context on any error to prevent leaks
                     self.active_searches.lock().await.remove(&search_id);
-                    let _ = self.delete_search(&search_id).await;
+                    let _ = self.delete_search(&context.slskd_id).await;
                     warn!("Search {} failed with error, cleaning up: {}", search_id, e);
                     return Err(e);
                 }
@@ -796,6 +880,37 @@ const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remo
 /// slskd's exact answer for a file it already has an unfinished transfer
 /// of (`DownloadService.EnqueueAsync`).
 const ALREADY_IN_PROGRESS: &str = "Skipped: Already in progress";
+
+/// The slskd search text for `subject` (an album or track title) by
+/// `artist`, leaving out empty parts so there are no stray spaces.
+fn search_query(artist: &str, subject: &str) -> String {
+    [artist.trim(), subject.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The query to retry with when a search including `artist` gets no
+/// responses: `subject` alone. `None` when the first query had no artist to
+/// drop, or `subject` alone is too short to be a useful search.
+fn artistless_query(artist: &str, subject: &str) -> Option<String> {
+    let subject = subject.trim();
+    if artist.trim().is_empty() || subject.chars().count() < MIN_FALLBACK_QUERY_CHARS {
+        return None;
+    }
+    Some(subject.to_string())
+}
+
+/// The fallback query to start now, given that the current search finished
+/// with `response_count` responses. Only a search nobody answered falls
+/// back, and only once: the fallback is consumed when returned.
+fn take_fallback(context: &mut SearchContext, response_count: usize) -> Option<String> {
+    if response_count > 0 {
+        return None;
+    }
+    context.fallback_query.take()
+}
 
 /// `value` as one path segment. URL parsing resolves `.` and `..` as dot
 /// segments even when percent-encoded, so those cannot be sent at all.
@@ -1419,5 +1534,383 @@ mod tests {
         assert_eq!(results[0].transfer_id.as_deref(), Some("t-01"));
         assert!(matches!(results[1].status, EnqueueStatus::Failed(_)));
         assert_eq!(results[1].transfer_id, None);
+    }
+
+    #[test]
+    fn the_query_joins_artist_and_subject() {
+        assert_eq!(
+            search_query("Static Harbor", "Glass Atlas"),
+            "Static Harbor Glass Atlas"
+        );
+    }
+
+    #[test]
+    fn the_query_trims_both_parts() {
+        assert_eq!(
+            search_query("  Static Harbor ", " Paper Lanterns  "),
+            "Static Harbor Paper Lanterns"
+        );
+    }
+
+    #[test]
+    fn an_empty_artist_leaves_no_stray_space() {
+        assert_eq!(search_query("", "Paper Lanterns"), "Paper Lanterns");
+        assert_eq!(search_query("   ", "Paper Lanterns"), "Paper Lanterns");
+        assert_eq!(search_query("Static Harbor", "  "), "Static Harbor");
+    }
+
+    #[test]
+    fn the_fallback_drops_the_artist() {
+        assert_eq!(
+            artistless_query("Static Harbor", "  Paper Lanterns "),
+            Some("Paper Lanterns".to_string())
+        );
+    }
+
+    #[test]
+    fn no_fallback_without_an_artist_to_drop() {
+        assert_eq!(artistless_query("", "Paper Lanterns"), None);
+        assert_eq!(artistless_query("  ", "Paper Lanterns"), None);
+    }
+
+    #[test]
+    fn no_fallback_for_a_too_short_subject() {
+        assert_eq!(artistless_query("Static Harbor", " ab "), None);
+        assert_eq!(artistless_query("Static Harbor", ""), None);
+        assert_eq!(artistless_query("Static Harbor", "abc"), Some("abc".into()));
+    }
+
+    fn context_with(fallback_query: Option<&str>) -> SearchContext {
+        SearchContext {
+            slskd_id: "s1".into(),
+            fallback_query: fallback_query.map(str::to_string),
+            artist: "Static Harbor".into(),
+            album: None,
+            track_titles: vec!["Paper Lanterns".into()],
+            start_time: Utc::now(),
+            timeout: Duration::seconds(120),
+            seen_response_count: 0,
+            require_flac: false,
+        }
+    }
+
+    #[test]
+    fn zero_responses_fall_back_exactly_once() {
+        let mut context = context_with(Some("Paper Lanterns"));
+        assert_eq!(
+            take_fallback(&mut context, 0),
+            Some("Paper Lanterns".to_string())
+        );
+        assert_eq!(take_fallback(&mut context, 0), None);
+    }
+
+    #[test]
+    fn responses_without_matches_do_not_fall_back() {
+        let mut context = context_with(Some("Paper Lanterns"));
+        assert_eq!(take_fallback(&mut context, 1), None);
+        // Still available: it was not consumed by the answered search.
+        assert_eq!(context.fallback_query.as_deref(), Some("Paper Lanterns"));
+    }
+
+    #[test]
+    fn no_fallback_query_means_no_fallback() {
+        let mut context = context_with(None);
+        assert_eq!(take_fallback(&mut context, 0), None);
+    }
+
+    /// One request the fake slskd received: method, path, body.
+    type Seen = (String, String, String);
+
+    /// A minimal slskd double on a local port. `route` answers each request
+    /// with a status and a JSON body; every request is recorded.
+    fn fake_slskd(
+        route: impl Fn(&str, &str) -> (u16, String) + Send + 'static,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<Seen>>>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Seen>::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                let mut parts = request_line.split_whitespace();
+                let method = parts.next().unwrap_or_default().to_string();
+                let path = parts.next().unwrap_or_default().to_string();
+                let mut content_length = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut body = vec![0; content_length];
+                let _ = reader.read_exact(&mut body);
+                let body = String::from_utf8_lossy(&body).to_string();
+
+                let (status, reply) = route(&method, &path);
+                log.lock().unwrap().push((method, path, body));
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    /// slskd routes for a run of searches `s1`, `s2`, ...: each POST starts
+    /// the next one, `responses[n]` is search n+1's answer (missing = none)
+    /// and every search reports complete.
+    fn searches_answering(
+        responses: Vec<serde_json::Value>,
+    ) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        let posts = std::sync::atomic::AtomicUsize::new(0);
+        move |method, path| {
+            let rest = path.strip_prefix("/api/v0/searches").unwrap_or(path);
+            match (method, rest) {
+                ("POST", "") => {
+                    let n = posts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    (200, format!(r#"{{"id":"s{n}"}}"#))
+                }
+                ("DELETE", _) => (204, String::new()),
+                ("GET", rest) if rest.ends_with("/responses") => {
+                    let n: usize = rest
+                        .trim_start_matches("/s")
+                        .trim_end_matches("/responses")
+                        .parse()
+                        .unwrap();
+                    let answer = responses
+                        .get(n - 1)
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([]));
+                    (200, answer.to_string())
+                }
+                ("GET", _) => (200, r#"{"isComplete":true,"state":"Completed"}"#.into()),
+                _ => (404, String::new()),
+            }
+        }
+    }
+
+    fn peer_with(filename: &str) -> serde_json::Value {
+        serde_json::json!([{
+            "username": "collector_01",
+            "files": [{ "filename": filename, "size": 30_000_000 }],
+            "hasFreeUploadSlot": true,
+            "uploadSpeed": 1_000_000,
+            "queueLength": 0
+        }])
+    }
+
+    fn track(artist: &str, title: &str) -> Track {
+        serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": title, "artist": artist
+        }))
+        .unwrap()
+    }
+
+    fn client_for(base_url: &str) -> SoulseekClient {
+        SoulseekClientBuilder::new()
+            .base_url(base_url)
+            .build()
+            .unwrap()
+    }
+
+    fn search_texts(seen: &std::sync::Mutex<Vec<Seen>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|(method, path, _)| method == "POST" && path == "/api/v0/searches")
+            .map(|(_, _, body)| {
+                let body: serde_json::Value = serde_json::from_str(body).unwrap();
+                body["searchText"].as_str().unwrap().to_string()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_search_nobody_answers_retries_without_the_artist() {
+        let (url, seen) = fake_slskd(searches_answering(vec![
+            serde_json::json!([]),
+            peer_with(r"Music\FLAC\Static Harbor\Glass Atlas\02 - Paper Lanterns.flac"),
+        ]));
+        let client = client_for(&url);
+
+        let id = client
+            .start_search(
+                None,
+                vec![track("Static Harbor", "Paper Lanterns")],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        // The first search finished unanswered: the poll stays in progress
+        // while the artist-less search runs under the same id.
+        let (albums, has_more, state) = client.poll_search(id.clone()).await.unwrap();
+        assert!(albums.is_empty());
+        assert!(has_more);
+        assert_eq!(state, SearchState::InProgress);
+        assert_eq!(
+            search_texts(&seen),
+            vec!["Static Harbor Paper Lanterns", "Paper Lanterns"]
+        );
+
+        let (albums, _, state) = client.poll_search(id.clone()).await.unwrap();
+        assert_eq!(state, SearchState::InProgress);
+        assert_eq!(albums.len(), 1);
+
+        let (albums, has_more, state) = client.poll_search(id.clone()).await.unwrap();
+        assert_eq!(state, SearchState::Completed);
+        assert!(!has_more);
+        assert_eq!(albums.len(), 1);
+        assert_eq!(search_texts(&seen).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_fallback_is_still_scored_against_the_artist_and_runs_once() {
+        // The artist-less search is answered by the searched artist's file
+        // and by another artist's file of the same title. Scoring still uses
+        // the searched artist, so the other artist's folder ranks lower.
+        let (url, seen) = fake_slskd(searches_answering(vec![
+            serde_json::json!([]),
+            serde_json::json!([{
+                "username": "collector_01",
+                "files": [
+                    {
+                        "filename": r"Music\Other Band\Somewhere\05 - Paper Lanterns.flac",
+                        "size": 30_000_000
+                    },
+                    {
+                        "filename": r"Music\Static Harbor\Glass Atlas\02 - Paper Lanterns.flac",
+                        "size": 30_000_000
+                    }
+                ],
+                "hasFreeUploadSlot": true,
+                "uploadSpeed": 1_000_000,
+                "queueLength": 0
+            }]),
+        ]));
+        let client = client_for(&url);
+        let id = client
+            .start_search(
+                None,
+                vec![track("Static Harbor", "Paper Lanterns")],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        let mut last = SearchState::InProgress;
+        let mut albums = Vec::new();
+        for _ in 0..5 {
+            let (found, _, state) = client.poll_search(id.clone()).await.unwrap();
+            if !found.is_empty() {
+                albums = found;
+            }
+            last = state;
+            if last != SearchState::InProgress {
+                break;
+            }
+        }
+        assert_eq!(last, SearchState::Completed);
+        assert_eq!(albums.len(), 2);
+        assert!(albums[0].album_path.contains("Static Harbor"));
+        assert!(albums[1].album_path.contains("Other Band"));
+        assert!(albums[0].score > albums[1].score);
+        assert_eq!(
+            search_texts(&seen),
+            vec!["Static Harbor Paper Lanterns", "Paper Lanterns"]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answered_search_without_matches_does_not_fall_back() {
+        let (url, seen) = fake_slskd(searches_answering(vec![peer_with(
+            r"Music\Other Band\Somewhere\05 - Unrelated.flac",
+        )]));
+        let client = client_for(&url);
+        let id = client
+            .start_search(
+                None,
+                vec![track("Static Harbor", "Paper Lanterns")],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        let mut last = SearchState::InProgress;
+        for _ in 0..5 {
+            let (_, _, state) = client.poll_search(id.clone()).await.unwrap();
+            last = state;
+            if last != SearchState::InProgress {
+                break;
+            }
+        }
+        assert_eq!(last, SearchState::Completed);
+        assert_eq!(search_texts(&seen), vec!["Static Harbor Paper Lanterns"]);
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_fallback_does_not_fall_back_again() {
+        let (url, seen) = fake_slskd(searches_answering(vec![]));
+        let client = client_for(&url);
+        let id = client
+            .start_search(
+                None,
+                vec![track("Static Harbor", "Paper Lanterns")],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        let (_, _, state) = client.poll_search(id.clone()).await.unwrap();
+        assert_eq!(state, SearchState::InProgress);
+        let (albums, has_more, state) = client.poll_search(id.clone()).await.unwrap();
+        assert_eq!(state, SearchState::Completed);
+        assert!(!has_more);
+        assert!(albums.is_empty());
+        assert_eq!(
+            search_texts(&seen),
+            vec!["Static Harbor Paper Lanterns", "Paper Lanterns"]
+        );
+        let (_, _, state) = client.poll_search(id).await.unwrap();
+        assert_eq!(state, SearchState::NotFound);
+    }
+
+    #[tokio::test]
+    async fn a_search_without_an_artist_does_not_fall_back() {
+        let (url, seen) = fake_slskd(searches_answering(vec![]));
+        let client = client_for(&url);
+        let id = client
+            .start_search(
+                None,
+                vec![track("", "Paper Lanterns")],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        let (_, _, state) = client.poll_search(id).await.unwrap();
+        assert_eq!(state, SearchState::Completed);
+        assert_eq!(search_texts(&seen), vec!["Paper Lanterns"]);
     }
 }
