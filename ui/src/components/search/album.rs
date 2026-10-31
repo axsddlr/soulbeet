@@ -29,62 +29,101 @@ pub struct Props {
     pub on_track_override_download: EventHandler<(Track, Folder)>,
 }
 
+/// The year of a release date, or the date as given when it does not start
+/// with one.
+fn year(date: &str) -> &str {
+    match date.get(..4) {
+        Some(y) if y.chars().all(|c| c.is_ascii_digit()) => y,
+        _ => date,
+    }
+}
+
 #[component]
 pub fn AlbumResult(props: Props) -> Element {
     let album = &props.album;
+    let year = album.release_date.as_deref().map(year);
+    let track_count = props
+        .tracks
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .map(|t| t.len());
+
+    let search_sources = rsx! {
+        button {
+            class: "p-2 rounded-full text-muted hover:text-white hover:bg-white/10 transition-colors cursor-pointer group/src",
+            title: "Search sources",
+            onclick: move |evt: MouseEvent| {
+                evt.stop_propagation();
+                props.on_search_sources.call(());
+            },
+            svg {
+                class: "w-5 h-5",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                view_box: "0 0 24 24",
+                path {
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    d: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+                }
+            }
+        }
+    };
+
+    let download = rsx! {
+        DownloadIcon {
+            item_id: props.album.id.clone(),
+            state: props.download_state.clone(),
+            folders: props.folders.clone(),
+            selected_folder_id: props.selected_folder_id.clone(),
+            active_menu: props.active_menu,
+            on_download: props.on_download,
+            on_override_download: props.on_override_download,
+            filled: true,
+        }
+    };
 
     rsx! {
-        div { class: "space-y-0",
-            // Album row
-            div {
-                class: "bg-white/5 border rounded-lg transition-all duration-200 flex items-center gap-3 p-3 group cursor-pointer",
-                class: if props.is_expanded { "border-beet-accent/30" } else { "border-white/5 hover:border-white/10" },
-                onclick: move |_| props.on_toggle.call(()),
+        div {
+            class: "h-full rounded-lg transition-colors duration-300",
+            class: if props.is_expanded { "bg-gradient-to-b from-beet-dim to-beet-panel overflow-visible" } else { "bg-beet-panel hover:bg-beet-dim" },
 
-                // Cover art
+            if props.is_expanded {
+                // Album header, Spotify style
                 div {
-                    class: "shrink-0",
-                    CoverArt { album: album.clone() }
-                }
-
-                // Album info
-                div { class: "flex-grow min-w-0",
-                    p { class: "text-sm font-bold text-white truncate group-hover:text-beet-accent transition-colors",
-                        "{album.title}"
+                    class: "flex flex-col sm:flex-row sm:items-end gap-4 md:gap-6 p-4 md:p-6 cursor-pointer group",
+                    onclick: move |_| props.on_toggle.call(()),
+                    CoverArt {
+                        album: album.clone(),
+                        class: "w-40 h-40 md:w-[232px] md:h-[232px] rounded shadow-2xl shadow-black/60",
                     }
-                    p { class: "text-xs text-gray-400 font-mono truncate", "{album.artist}" }
-                    if let Some(release_date) = &album.release_date {
-                        p { class: "text-xs text-gray-500 font-mono", "{release_date}" }
-                    }
-                }
-
-                // Chevron indicator (D-02)
-                svg {
-                    class: "w-4 h-4 transition-transform duration-200 shrink-0",
-                    class: if props.is_expanded { "rotate-90 text-beet-accent" } else { "text-gray-500 group-hover:text-white" },
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    view_box: "0 0 24 24",
-                    path {
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        d: "M8.25 4.5l7.5 7.5-7.5 7.5",
+                    div { class: "min-w-0 flex-1",
+                        p { class: "text-xs font-bold text-white mb-1 md:mb-2", "Album" }
+                        p { class: "text-3xl md:text-5xl lg:text-7xl font-extrabold tracking-tight text-white leading-none break-words line-clamp-2 pb-1",
+                            "{album.title}"
+                        }
+                        p { class: "mt-3 md:mt-5 text-sm text-muted truncate",
+                            span { class: "font-bold text-white", "{album.artist}" }
+                            if let Some(year) = year {
+                                " · {year}"
+                            }
+                            if let Some(n) = track_count {
+                                " · {n} tracks"
+                            }
+                        }
                     }
                 }
-
-                // Action buttons
-                div { class: "flex items-center gap-1 shrink-0",
-                    // Search sources button
+                // Action row
+                div { class: "flex items-center gap-2 px-4 md:px-6 pb-4",
+                    {download}
+                    {search_sources}
                     button {
-                        class: "p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer group/src",
-                        title: "Search sources",
-                        onclick: move |evt: MouseEvent| {
-                            evt.stop_propagation();
-                            props.on_search_sources.call(());
-                        },
+                        class: "p-2 rounded-full text-muted hover:text-white transition-colors cursor-pointer",
+                        title: "Collapse",
+                        onclick: move |_| props.on_toggle.call(()),
                         svg {
-                            class: "w-4 h-4 text-gray-500 group-hover/src:text-white transition-colors",
+                            class: "w-5 h-5 -rotate-90",
                             fill: "none",
                             stroke: "currentColor",
                             stroke_width: "2",
@@ -92,20 +131,39 @@ pub fn AlbumResult(props: Props) -> Element {
                             path {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
-                                d: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+                                d: "M8.25 4.5l7.5 7.5-7.5 7.5",
                             }
                         }
                     }
-
-                    // Auto-download button
-                    DownloadIcon {
-                        item_id: props.album.id.clone(),
-                        state: props.download_state.clone(),
-                        folders: props.folders.clone(),
-                        selected_folder_id: props.selected_folder_id.clone(),
-                        active_menu: props.active_menu,
-                        on_download: props.on_download,
-                        on_override_download: props.on_override_download,
+                }
+            } else {
+                // Album card
+                div {
+                    class: "p-3 group cursor-pointer",
+                    onclick: move |_| props.on_toggle.call(()),
+                    div { class: "relative mb-3",
+                        CoverArt {
+                            album: album.clone(),
+                            class: "w-full aspect-square rounded-md shadow-lg shadow-black/50",
+                        }
+                        // Round green action, shown on hover like Spotify's play button
+                        div { class: "absolute right-2 bottom-2 z-10 transition-opacity duration-200 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100",
+                            {download}
+                        }
+                    }
+                    div { class: "flex items-start gap-1",
+                        div { class: "min-w-0 flex-1",
+                            p { class: "text-sm md:text-base font-bold text-white truncate",
+                                "{album.title}"
+                            }
+                            p { class: "text-xs md:text-sm text-muted truncate mt-1",
+                                if let Some(year) = year {
+                                    "{year} · "
+                                }
+                                "{album.artist}"
+                            }
+                        }
+                        {search_sources}
                     }
                 }
             }

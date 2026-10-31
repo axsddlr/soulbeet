@@ -11,14 +11,21 @@ fn get_album_cover_url(album: &Album) -> Option<String> {
         .map(|mbid| format!("https://coverartarchive.org/release/{}/front-250", mbid))
 }
 
+/// The album cover, or a note icon when there is none. `class` sets the size
+/// and corners; it defaults to an 80px tile.
 #[component]
-pub fn CoverArt(album: Album) -> Element {
+pub fn CoverArt(album: Album, #[props(default)] class: String) -> Element {
     let mut has_error = use_signal(|| false);
     let cover_url = get_album_cover_url(&album);
     let alt = format!("Cover for {}", album.title);
+    let size = if class.is_empty() {
+        "w-20 h-20 rounded-md".to_string()
+    } else {
+        class
+    };
 
     rsx! {
-      div { class: "w-20 h-20 flex-shrink-0 bg-beet-panel border border-white/5 rounded-md flex items-center justify-center overflow-hidden",
+      div { class: "{size} flex-shrink-0 bg-beet-dim flex items-center justify-center overflow-hidden",
         if let Some(url) = cover_url.filter(|_| !has_error()) {
           img {
             src: "{url}",
@@ -28,7 +35,7 @@ pub fn CoverArt(album: Album) -> Element {
           }
         } else {
           svg {
-            class: "w-8 h-8 text-white/20",
+            class: "w-1/3 h-1/3 max-w-12 max-h-12 text-white/30",
             xmlns: "http://www.w3.org/2000/svg",
             fill: "none",
             "viewBox": "0 0 24 24",

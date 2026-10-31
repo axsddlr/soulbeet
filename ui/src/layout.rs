@@ -1,16 +1,12 @@
-use crate::components::Footer;
 use dioxus::prelude::*;
 
+/// The app shell: a full-height column holding the sidebar row, the
+/// activity bar and, on phones, the tab bar.
 #[component]
 pub fn Layout(children: Element) -> Element {
     rsx! {
-      // CRT Scanline Effect Overlay
-      div { class: "fixed inset-0 z-50 pointer-events-none opacity-50 crt-overlay h-full w-full" }
-
-      // Main container
-      div { class: "relative z-10 flex flex-col h-screen max-w-7xl mx-auto",
+      div { class: "relative flex flex-col h-dvh w-full bg-black text-white overflow-hidden",
         {children}
-        Footer {}
       }
     }
 }
