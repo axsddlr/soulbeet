@@ -69,7 +69,13 @@ test('Require FLAC only keeps mp3 sources out of the options', async ({ context,
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   const toggle = page.getByRole('switch', { name: 'Require FLAC only' });
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  // The switch flips before the save answers; wait for the save so leaving
+  // the page cannot cut it off.
+  const saved = page.waitForResponse(
+    (res) => res.url().endsWith('/api/settings') && res.request().method() === 'POST',
+  );
   await toggle.click();
+  expect((await saved).ok()).toBe(true);
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
 
   // The saved value survives a full reload of the app.
