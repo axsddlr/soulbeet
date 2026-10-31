@@ -17,6 +17,24 @@ pub struct DiscoveryHistoryRow {
     pub created_at: String,
 }
 
+/// Key used to compare suggested tracks. Folded in Rust because SQLite's
+/// `lower()` only folds ASCII, which never matches `to_lowercase()` keys for
+/// non-ASCII names (upstream #94).
+pub fn fold_key(artist: &str, track: &str) -> String {
+    format!("{}:{}", artist.to_ascii_lowercase(), track.to_ascii_lowercase())
+}
+
+/// Ids of `(id, artist, track)` rows whose folded key equals the folded
+/// `artist`/`track`.
+#[cfg(feature = "server")]
+fn matching_ids(rows: Vec<(String, String, String)>, artist: &str, track: &str) -> Vec<String> {
+    let wanted = fold_key(artist, track);
+    rows.into_iter()
+        .filter(|(_, a, t)| fold_key(a, t) == wanted)
+        .map(|(id, _, _)| id)
+        .collect()
+}
+
 #[cfg(feature = "server")]
 impl DiscoveryHistoryRow {
     /// Record a track as suggested to a user for a specific profile.
@@ -75,5 +93,37 @@ impl DiscoveryHistoryRow {
             .into_iter()
             .map(|(a, t)| format!("{}:{}", a, t))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fold_key_folds_non_ascii_like_candidate_keys() {
+        let candidate = format!("{}:{}", "Übers Meer".to_lowercase(), "x");
+        assert_eq!(fold_key("Übers Meer", "X"), candidate);
+        assert_eq!(fold_key("Übers Meer", "t"), fold_key("übers meer", "T"));
+    }
+
+    #[test]
+    fn fold_key_folds_cyrillic() {
+        assert_eq!(
+            fold_key("Мумий Тролль", "Утекай"),
+            fold_key("мумий тролль", "утекай")
+        );
+        assert_eq!(fold_key("Мумий Тролль", "Утекай"), "мумий тролль:утекай");
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn matching_ids_compares_folded_keys() {
+        let rows = vec![
+            ("1".to_string(), "Übers Meer".to_string(), "Lied".to_string()),
+            ("2".to_string(), "Other".to_string(), "Lied".to_string()),
+            ("3".to_string(), "ÜBERS MEER".to_string(), "LIED".to_string()),
+        ];
+        assert_eq!(matching_ids(rows, "übers meer", "lied"), vec!["1", "3"]);
     }
 }
