@@ -6,8 +6,10 @@ use dioxus::logger::tracing::warn;
 use dioxus::prelude::*;
 use shared::download::{DownloadProgress, DownloadState, ImportChoice, KeptImport, MatchChoices};
 
+mod activity_bar;
 mod item;
 mod picker;
+pub use activity_bar::ActivityBar;
 use api::CancelDownloadRequest;
 use item::DownloadItem;
 
@@ -118,34 +120,66 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
 
     let close_modal = move |_| props.is_open.set(false);
 
+    // Escape closes the drawer wherever focus is, as the backdrop click does.
+    let mut is_open = props.is_open;
+    use_effect(move || {
+        spawn(async move {
+            let mut keys = document::eval(
+                r#"
+                document.addEventListener("keydown", (event) => {
+                    if (event.key === "Escape") dioxus.send(true);
+                });
+                await new Promise(() => {});
+                "#,
+            );
+            while keys.recv::<bool>().await.is_ok() {
+                if *is_open.peek() {
+                    is_open.set(false);
+                }
+            }
+        });
+    });
+
     let (modal_opacity, panel_translate, pointer_events) = if (*props.is_open)() {
-        ("opacity-100", "translate-x-0", "pointer-events-auto")
+        ("opacity-100 visible", "translate-x-0", "pointer-events-auto")
     } else {
-        ("opacity-0", "translate-x-full", "pointer-events-none")
+        // Hidden once the fade ends: nothing closed can take a click or focus.
+        ("opacity-0 invisible", "translate-x-full", "pointer-events-none")
     };
 
     rsx! {
-      div { class: "fixed inset-0 z-50 flex justify-end transition-opacity duration-200 ease-out {modal_opacity} {pointer_events}",
+      div { class: "fixed inset-0 z-50 flex justify-end transition-[opacity,visibility] duration-200 ease-out {modal_opacity} {pointer_events}",
         // Backdrop
         div {
-          class: "absolute inset-0 bg-black/60 backdrop-blur-sm cursor-pointer",
+          class: "absolute inset-0 bg-black/70 cursor-pointer",
+          aria_hidden: "true",
           onclick: close_modal,
         }
 
         // Panel
-        div { class: "relative w-full max-w-md bg-beet-panel border-l border-white/10 h-full shadow-2xl transform transition-transform duration-200 ease-out flex flex-col {panel_translate}",
+        div { class: "relative w-full max-w-md bg-beet-panel h-full shadow-2xl shadow-black md:rounded-l-lg transform transition-transform duration-200 ease-out flex flex-col {panel_translate}",
           //Header
-          div { class: "p-6 border-b border-white/10 flex justify-between items-center bg-black/20",
+          div { class: "p-6 flex justify-between items-center bg-gradient-to-b from-beet-dim to-beet-panel md:rounded-tl-lg",
             div {
-              h3 { class: "text-xl font-bold text-white font-display",
+              h3 { class: "text-2xl font-bold text-white tracking-tight",
                 "Active Transfers"
               }
-              p { class: "text-xs text-beet-leaf font-mono mt-1",
-                ":: {processing_count} PROCESSING // {errored_count} ERRORED"
+              p { class: "flex items-center gap-3 text-xs text-muted lowercase mt-1.5",
+                span { class: "flex items-center gap-1.5",
+                  span { class: "w-1.5 h-1.5 rounded-full bg-beet-leaf" }
+                  "{processing_count} PROCESSING"
+                }
+                span { class: "flex items-center gap-1.5",
+                  span {
+                    class: "w-1.5 h-1.5 rounded-full",
+                    class: if errored_count > 0 { "bg-red-500" } else { "bg-white/30" },
+                  }
+                  "{errored_count} ERRORED"
+                }
               }
             }
             button {
-              class: "text-gray-400 hover:text-white transition-colors cursor-pointer",
+              class: "p-1.5 rounded-full text-muted hover:text-white hover:bg-white/10 transition-colors cursor-pointer",
               aria_label: "Close downloads",
               onclick: close_modal,
               svg {
@@ -164,9 +198,9 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
           }
 
           // Content
-          div { class: "flex-1 overflow-y-auto p-6 no-scrollbar space-y-4",
+          div { class: "flex-1 overflow-y-auto px-4 md:px-6 pb-6 no-scrollbar space-y-2",
             if active_downloads.is_empty() {
-              div { class: "text-center text-gray-500 py-10 font-mono text-sm",
+              div { class: "text-center text-muted py-10 text-sm",
                 "No active transfers in the queue."
               }
             }
@@ -182,9 +216,9 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
             }
           }
           // Footer
-          div { class: "p-4 border-t border-white/10 bg-black/20",
+          div { class: "p-4 border-t border-white/5",
             button {
-              class: "w-full py-2 text-xs font-mono uppercase tracking-widest text-center border border-white/10 hover:bg-white/5 text-gray-400 hover:text-white transition-colors cursor-pointer hover:border-red-500/30",
+              class: "pill-outline w-full py-2",
               onclick: clear_finished,
               "CLEAR COMPLETED"
             }

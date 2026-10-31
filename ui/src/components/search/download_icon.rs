@@ -27,6 +27,10 @@ pub struct DownloadIconProps {
     pub on_download: EventHandler<()>,
     #[props(into)]
     pub on_override_download: EventHandler<Folder>,
+    /// A large round button, green while it can download, like Spotify's
+    /// play button on a card.
+    #[props(default)]
+    pub filled: bool,
 }
 
 #[component]
@@ -59,10 +63,21 @@ pub fn DownloadIcon(props: DownloadIconProps) -> Element {
         "relative shrink-0"
     };
 
+    let button_class = match (props.filled, state) {
+        (false, _) => "p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer group/dl",
+        (true, DownloadRowState::Idle) => "w-12 h-12 flex items-center justify-center rounded-full bg-beet-accent hover:bg-beet-leaf hover:scale-105 shadow-lg shadow-black/40 transition-all cursor-pointer group/dl",
+        (true, _) => "w-12 h-12 flex items-center justify-center rounded-full bg-beet-dim shadow-lg shadow-black/40 transition-all cursor-pointer group/dl",
+    };
+    let idle_icon = if props.filled {
+        "w-5 h-5 text-black"
+    } else {
+        "w-5 h-5 text-muted group-hover/dl:text-white transition-colors"
+    };
+
     rsx! {
         div { class: "{wrapper_class}",
             button {
-                class: "p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer group/dl",
+                class: "{button_class}",
                 aria_label: "Download",
                 disabled: !is_interactive,
                 onpointerdown: move |evt: PointerEvent| {
@@ -125,7 +140,7 @@ pub fn DownloadIcon(props: DownloadIconProps) -> Element {
                 match state {
                     DownloadRowState::Idle => rsx! {
                         svg {
-                            class: "w-5 h-5 text-gray-400 group-hover/dl:text-beet-accent transition-colors",
+                            class: "{idle_icon}",
                             fill: "none",
                             stroke: "currentColor",
                             stroke_width: "2",
@@ -172,7 +187,7 @@ pub fn DownloadIcon(props: DownloadIconProps) -> Element {
                     },
                     DownloadRowState::Disabled => rsx! {
                         svg {
-                            class: "w-5 h-5 text-gray-700 cursor-not-allowed",
+                            class: "w-5 h-5 text-white/20 cursor-not-allowed",
                             fill: "none",
                             stroke: "currentColor",
                             stroke_width: "2",

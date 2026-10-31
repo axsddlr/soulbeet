@@ -4,8 +4,8 @@ pub use crate::settings_context::SearchType;
 
 #[component]
 pub fn SearchTypeToggle(search_type: Signal<SearchType>) -> Element {
-    let active_class = "text-white bg-white/10 shadow-sm";
-    let inactive_class = "text-gray-500 hover:text-gray-300 hover:bg-white/5";
+    let active_class = "text-black bg-white";
+    let inactive_class = "text-white bg-white/10 hover:bg-white/20";
 
     let album_class = if search_type() == SearchType::Album {
         active_class
@@ -19,14 +19,14 @@ pub fn SearchTypeToggle(search_type: Signal<SearchType>) -> Element {
     };
 
     rsx! {
-      div { class: "flex items-center bg-black/20 rounded p-1 mr-2",
+      div { class: "flex items-center gap-1.5 mr-2",
         button {
-          class: "px-3 py-1 text-xs font-bold rounded transition-all duration-200 {album_class}",
+          class: "px-3 py-1.5 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer {album_class}",
           onclick: move |_| search_type.set(SearchType::Album),
           "ALBUM"
         }
         button {
-          class: "px-3 py-1 text-xs font-bold rounded transition-all duration-200 {track_class}",
+          class: "px-3 py-1.5 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer {track_class}",
           onclick: move |_| search_type.set(SearchType::Track),
           "TRACK"
         }

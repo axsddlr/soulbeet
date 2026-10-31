@@ -588,12 +588,8 @@ pub fn Search() -> Element {
     };
 
     rsx! {
-      // bg decorations
-      div { class: "fixed top-1/4 -left-10 w-64 h-64 bg-beet-accent/10 rounded-full blur-[150px] pointer-events-none" }
-      div { class: "fixed bottom-1/4 -right-10 w-64 h-64 bg-beet-leaf/10 rounded-full blur-[150px] pointer-events-none" }
-
       div {
-        class: "w-full max-w-3xl space-y-8 z-10 mx-auto flex flex-col items-center mt-20",
+        class: "w-full space-y-6 md:space-y-8 flex flex-col items-stretch mt-2 md:mt-6",
         onclick: move |_| {
             if active_menu().is_some() {
                 active_menu.set(None);
@@ -601,23 +597,23 @@ pub fn Search() -> Element {
         },
 
         // Title Area
-        div { class: "text-center space-y-2",
-          h2 { class: "text-4xl md:text-6xl font-bold tracking-tight",
+        div { class: "space-y-2",
+          h2 { class: "text-3xl md:text-5xl font-extrabold tracking-tight",
             span { class: "text-white", "Harvest" }
             " "
-            span { class: "text-beet-leaf font-light italic", "Music." }
+            span { class: "text-beet-accent", "Music." }
           }
-          p { class: "text-gray-400 font-mono text-sm",
+          p { class: "text-muted text-sm",
             "Search & Download // Manage Your Library"
           }
         }
 
         // Search bar
-        div { class: "w-full relative group",
+        div { class: "w-full max-w-4xl space-y-3",
 
-          div { class: "absolute -inset-1 bg-gradient-to-r from-beet-accent to-beet-leaf rounded-t-lg rounded-b-0 md:rounded-b-lg blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200" }
-          div { class: "relative flex items-center bg-beet-dark border border-white/10 rounded-t-lg rounded-b-0 md:rounded-b-lg p-2 shadow-2xl",
-            div { class: "pl-4 pr-2 text-gray-500",
+          div { class: "flex items-center gap-3",
+          div { class: "flex-1 min-w-0 flex items-center bg-beet-input rounded-full h-12 md:h-14 pr-2 ring-1 ring-transparent hover:ring-white/20 hover:bg-[#2a2a2a] focus-within:ring-2 focus-within:ring-white transition-all",
+            div { class: "pl-5 pr-3 text-muted",
               svg {
                 class: "w-6 h-6",
                 fill: "none",
@@ -634,7 +630,7 @@ pub fn Search() -> Element {
             input {
               "type": "text",
               value: "{search}",
-              class: "w-2/3 bg-transparent border-none focus:ring-0 text-white text-sm placeholder-gray-600 font-mono h-10 focus:outline-none",
+              class: "flex-1 min-w-0 bg-transparent border-none focus:ring-0 text-white text-base placeholder-muted h-10 focus:outline-none",
               placeholder: "Search artist, album or track...",
               oninput: move |event| search.set(event.value()),
               onkeydown: move |event| {
@@ -644,11 +640,11 @@ pub fn Search() -> Element {
               },
             }
 
-            div { class: "hidden md:flex h-8 w-px bg-white/10 mx-2" }
+            div { class: "hidden md:flex h-6 w-px bg-white/20 mx-2" }
             input {
               "type": "text",
               value: "{artist.read().clone().unwrap_or_default()}",
-              class: "hidden md:flex w-1/3 bg-transparent border-none focus:ring-0 text-gray-400 text-sm placeholder-gray-700 font-mono h-10 focus:outline-none",
+              class: "hidden md:flex w-1/3 max-w-56 bg-transparent border-none focus:ring-0 text-white text-sm placeholder-muted/70 h-10 focus:outline-none pr-3",
               placeholder: "Artist (opt)",
               oninput: move |event| {
                   let val = event.value();
@@ -660,7 +656,8 @@ pub fn Search() -> Element {
                   }
               },
             }
-            div { class: "hidden md:flex items-center",
+          }
+            div { class: "hidden md:flex items-center shrink-0",
               if folders.read().len() > 1 {
                 FolderChip {
                   folders: folders.read().clone(),
@@ -671,7 +668,7 @@ pub fn Search() -> Element {
               }
               SearchTypeToggle { search_type }
               Button {
-                class: "rounded ml-2 whitespace-nowrap",
+                class: "ml-1 whitespace-nowrap",
                 disabled: loading() || search.read().is_empty(),
                 onclick: move |_| {
                     spawn(perform_search());
@@ -681,11 +678,11 @@ pub fn Search() -> Element {
             }
           }
           // Mobile search bar
-          div { class: "md:hidden relative flex items-center bg-beet-dark border border-t-0 md:border-t border-white/10 rounded-b-lg rounded-t-0 md:rounded-t-lg p-2 shadow-2xl",
+          div { class: "md:hidden flex items-center gap-2",
             input {
               "type": "text",
               value: "{artist.read().clone().unwrap_or_default()}",
-              class: "w-full pl-4 bg-transparent border-none focus:ring-0 text-gray-400 text-sm placeholder-gray-700 font-mono h-10 focus:outline-none",
+              class: "flex-1 min-w-0 px-4 bg-beet-input rounded-full border-none focus:ring-2 focus:ring-white text-white text-sm placeholder-muted/70 h-10 focus:outline-none",
               placeholder: "Artist (opt)",
               oninput: move |event| {
                   let val = event.value();
@@ -701,7 +698,7 @@ pub fn Search() -> Element {
             SearchTypeToggle { search_type }
 
             Button {
-              class: "rounded ml-2 whitespace-nowrap",
+              class: "whitespace-nowrap px-4",
               disabled: loading() || search.read().is_empty(),
               onclick: move |_| {
                   spawn(perform_search());
@@ -715,7 +712,7 @@ pub fn Search() -> Element {
         SystemStatus { health: system_health.get(), navidrome_status: auth.navidrome_status() }
 
         if !download_error().is_empty() {
-          p { class: "text-sm font-mono text-red-400 mt-4", "{download_error}" }
+          p { class: "text-sm text-red-400 mt-4", "{download_error}" }
         }
 
         // Results
@@ -735,19 +732,47 @@ pub fn Search() -> Element {
           }
         } else if loading() {
           div { class: "flex flex-col justify-center items-center py-10",
-            div { class: "animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-beet-accent" }
+            div { class: "animate-spin rounded-full h-12 w-12 border-4 border-white/10 border-t-beet-accent" }
           }
         } else {
           match &*search_results.read() {
               Some(ref data) if !data.results.is_empty() => {
                 let provider = data.provider;
+                let albums = matches!(data.results.first(), Some(SearchResult::Album(_)));
+                let list_class = if albums {
+                    "list-none p-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
+                } else {
+                    "list-none p-0 flex flex-col"
+                };
                 rsx! {
-                  div { class: "w-full bg-beet-panel/50 border border-white/5 p-6 backdrop-blur-sm mt-8 rounded-lg",
-                    h5 { class: "text-xl font-display font-bold mb-4 border-b border-white/10 pb-2 text-white",
+                  div { class: "w-full mt-2",
+                    h5 { class: "text-2xl font-bold mb-4 text-white tracking-tight",
                       "Search Results"
                     }
-                    ul { class: "list-none p-0 space-y-4",
-                      for item in data.results.iter() {
+                    if !albums {
+                      div { class: "hidden md:grid grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_4rem_4.5rem] gap-4 px-4 pb-2 mb-2 border-b border-white/10 text-xs font-medium uppercase tracking-wider text-muted",
+                        span { class: "text-right", "#" }
+                        span { "Title" }
+                        span { "Album" }
+                        span { class: "flex justify-end",
+                          svg {
+                            class: "w-4 h-4",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            view_box: "0 0 24 24",
+                            path {
+                              stroke_linecap: "round",
+                              stroke_linejoin: "round",
+                              d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
+                            }
+                          }
+                        }
+                        span {}
+                      }
+                    }
+                    ul { class: "{list_class}",
+                      for (index, item) in data.results.iter().enumerate() {
                         match item {
                             SearchResult::Track(ref track) => {
                                 let track_clone = track.clone();
@@ -763,6 +788,7 @@ pub fn Search() -> Element {
                                 rsx! {
                                   li { key: "{track.id}",
                                     TrackResult {
+                                      index,
                                       on_search_sources: move || {
                                           spawn(download(DownloadQuery::from(track_clone.clone())));
                                       },
@@ -814,6 +840,7 @@ pub fn Search() -> Element {
 
                                 rsx! {
                                   li { key: "{album.id}",
+                                    class: if is_expanded { "col-span-full" },
                                     AlbumResult {
                                       is_expanded,
                                       on_toggle: {
@@ -882,7 +909,7 @@ pub fn Search() -> Element {
                 }
               },
               Some(_) => rsx! {
-                div { class: "text-center text-gray-500 py-10 font-mono", "No signals found in the ether." }
+                div { class: "text-center text-muted py-10", "No signals found in the ether." }
               },
               None => rsx! {},
           }
@@ -890,7 +917,7 @@ pub fn Search() -> Element {
 
         // Fallback toasts (D-14 through D-17)
         if !fallback_toasts.read().is_empty() {
-          div { class: "fixed bottom-4 right-4 flex flex-col-reverse gap-2 z-40 w-80 md:w-96",
+          div { class: "fixed bottom-36 md:bottom-24 right-4 flex flex-col-reverse gap-2 z-40 w-80 md:w-96",
             for toast_data in fallback_toasts.read().iter() {
               FallbackToast {
                 key: "{toast_data.id}",

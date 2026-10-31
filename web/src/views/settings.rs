@@ -28,18 +28,16 @@ pub fn SettingsPage() -> Element {
     });
 
     rsx! {
-        div { class: "fixed top-1/4 -left-10 w-64 h-64 bg-beet-accent/10 rounded-full blur-[100px] pointer-events-none" }
-        div { class: "fixed bottom-1/4 -right-10 w-64 h-64 bg-beet-leaf/10 rounded-full blur-[100px] pointer-events-none" }
 
-        div { class: "space-y-6 text-white w-full max-w-3xl z-10 mx-auto",
-            div { class: "text-center mb-6",
-                h1 { class: "text-4xl font-bold text-beet-accent mb-2 font-display",
+        div { class: "text-white w-full max-w-5xl mx-auto mt-2 md:mt-6",
+            div { class: "mb-6 md:mb-8",
+                h1 { class: "text-3xl md:text-5xl font-extrabold tracking-tight text-white leading-tight",
                     "Settings"
                 }
             }
 
             // Tab navigation - pill style matching navbar
-            nav { class: "flex items-center justify-center gap-1 bg-beet-panel/50 p-1.5 rounded-full border border-white/5 backdrop-blur-sm w-fit mx-auto",
+            nav { class: "flex flex-wrap items-center gap-2 w-fit",
                 TabButton {
                     label: "Search",
                     icon_path: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
@@ -87,9 +85,9 @@ fn TabButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if active {
-        "flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 text-white text-sm font-medium transition-all cursor-pointer"
+        "flex items-center gap-2 px-4 py-1.5 rounded-full bg-white text-black text-sm font-semibold transition-all cursor-pointer"
     } else {
-        "flex items-center gap-2 px-4 py-2 rounded-full text-gray-400 text-sm font-medium hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+        "flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 text-white text-sm font-semibold hover:bg-white/20 transition-all cursor-pointer"
     };
 
     rsx! {

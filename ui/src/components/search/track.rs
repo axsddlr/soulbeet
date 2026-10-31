@@ -7,6 +7,9 @@ use super::download_icon::{DownloadIcon, DownloadRowState};
 #[derive(Props, PartialEq, Clone)]
 pub struct Props {
     pub track: Track,
+    /// Position in the result list, from 0; shown 1-based in the # column.
+    #[props(default)]
+    pub index: usize,
     pub on_album_click: Callback,
     pub on_search_sources: Callback,
     pub download_state: DownloadRowState,
@@ -24,50 +27,63 @@ pub fn TrackResult(props: Props) -> Element {
     let track = props.track.clone();
     let mut cover_error = use_signal(|| false);
 
-    let cover_url = track.release_mbid.as_ref().map(|mbid| {
-        format!("https://coverartarchive.org/release/{}/front-250", mbid)
-    });
+    let cover_url = track
+        .release_mbid
+        .as_ref()
+        .map(|mbid| format!("https://coverartarchive.org/release/{}/front-250", mbid));
+
+    let number = props.index + 1;
 
     rsx! {
       div {
-        class: "bg-white/5 border border-white/5 rounded-lg hover:border-white/10 transition-all duration-200 group flex items-center gap-3 p-3",
+        class: "group grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_4rem_4.5rem] items-center gap-3 md:gap-4 px-2 md:px-4 py-2 rounded-md hover:bg-white/10 transition-colors",
 
-        // Cover art
-        div {
-          class: "w-12 h-12 flex-shrink-0 bg-beet-panel border border-white/5 rounded flex items-center justify-center overflow-hidden cursor-pointer",
-          onclick: move |_| props.on_album_click.call(()),
-          if let Some(url) = cover_url.filter(|_| !cover_error()) {
-            img {
-              src: "{url}",
-              alt: "Cover",
-              class: "w-full h-full object-cover",
-              onerror: move |_| cover_error.set(true),
+        // Number
+        span { class: "hidden md:block text-sm text-muted text-right tabular-nums", "{number}" }
+
+        // Cover thumb, title and artist
+        div { class: "flex items-center gap-3 min-w-0",
+          div {
+            class: "w-10 h-10 flex-shrink-0 bg-beet-dim rounded flex items-center justify-center overflow-hidden cursor-pointer",
+            onclick: move |_| props.on_album_click.call(()),
+            if let Some(url) = cover_url.filter(|_| !cover_error()) {
+              img {
+                src: "{url}",
+                alt: "Cover",
+                class: "w-full h-full object-cover",
+                onerror: move |_| cover_error.set(true),
+              }
+            } else {
+              svg {
+                class: "w-5 h-5 text-white/30",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.5",
+                view_box: "0 0 24 24",
+                path {
+                  stroke_linecap: "round",
+                  stroke_linejoin: "round",
+                  d: "M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z",
+                }
+              }
             }
-          } else {
-            svg {
-              class: "w-5 h-5 text-white/20",
-              fill: "none",
-              stroke: "currentColor",
-              stroke_width: "1.5",
-              view_box: "0 0 24 24",
-              path {
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                d: "M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z",
+          }
+          div { class: "min-w-0",
+            p { class: "text-sm md:text-base font-medium text-white truncate", "{track.title}" }
+            p { class: "text-xs md:text-sm text-muted truncate group-hover:text-white transition-colors",
+              "{track.artist}"
+              if let Some(album_title) = &track.album_title {
+                span { class: "md:hidden", " · {album_title}" }
               }
             }
           }
         }
 
-        // Track info
-        div { class: "flex-grow min-w-0",
-          p { class: "text-sm font-bold text-white truncate group-hover:text-beet-accent transition-colors",
-            "{track.title}"
-          }
-          p { class: "text-xs text-gray-400 font-mono truncate", "{track.artist}" }
+        // Album
+        div { class: "hidden md:block min-w-0",
           if let Some(album_title) = &track.album_title {
             p {
-              class: "text-xs text-gray-500 truncate cursor-pointer hover:text-beet-leaf transition-colors",
+              class: "text-sm text-muted truncate cursor-pointer hover:text-white hover:underline transition-colors",
               onclick: move |_| props.on_album_click.call(()),
               "{album_title}"
             }
@@ -75,24 +91,24 @@ pub fn TrackResult(props: Props) -> Element {
         }
 
         // Duration
-        if let Some(duration) = &track.duration {
-          p { class: "text-xs font-mono text-gray-600 whitespace-nowrap shrink-0",
+        span { class: "hidden md:block text-sm text-muted text-right tabular-nums whitespace-nowrap",
+          if let Some(duration) = &track.duration {
             "{duration}"
           }
         }
 
         // Action buttons
-        div { class: "flex items-center gap-1 shrink-0",
+        div { class: "flex items-center justify-end gap-1 shrink-0",
           // Search sources button
           button {
-            class: "p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer group/src",
+            class: "p-2 rounded-full text-muted hover:text-white hover:bg-white/10 transition-all cursor-pointer [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 group/src",
             title: "Search sources",
             onclick: move |evt: MouseEvent| {
               evt.stop_propagation();
               props.on_search_sources.call(());
             },
             svg {
-              class: "w-4 h-4 text-gray-500 group-hover/src:text-white transition-colors",
+              class: "w-4 h-4",
               fill: "none",
               stroke: "currentColor",
               stroke_width: "2",

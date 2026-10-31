@@ -12,6 +12,11 @@ pub fn importer_chip(level: HealthLevel) -> (&'static str, &'static str) {
     (dot, level.chip())
 }
 
+/// A service status pill: a dot, then the service and its state.
+const CHIP: &str = "flex items-center gap-2 px-3 py-1 rounded-full bg-white/10";
+/// Sentence case on screen; the text stays as written for the e2e locators.
+const LABEL: &str = "inline-block lowercase first-letter:uppercase";
+
 #[component]
 pub fn SystemStatus(health: SystemHealth, navidrome_status: NavidromeStatus) -> Element {
     let nav_hint = match navidrome_status {
@@ -35,39 +40,43 @@ pub fn SystemStatus(health: SystemHealth, navidrome_status: NavidromeStatus) -> 
     );
 
     rsx! {
-      div { class: "flex justify-center gap-6 text-xs font-mono text-gray-500 flex-wrap",
-        span { class: "flex items-center gap-2",
+      div { class: "flex justify-center gap-2 flex-wrap text-xs font-medium text-muted",
+        span { class: CHIP,
           span {
             class: format!(
-                "w-2 h-2 rounded-full {}",
+                "w-1.5 h-1.5 rounded-full {}",
                 if health.downloader_online { "bg-beet-leaf animate-pulse" } else { "bg-red-500" },
             ),
           }
-          if health.downloader_online {
-            "DOWNLOADER ONLINE"
-          } else {
-            "DOWNLOADER OFFLINE"
+          span { class: LABEL,
+            if health.downloader_online {
+              "DOWNLOADER ONLINE"
+            } else {
+              "DOWNLOADER OFFLINE"
+            }
           }
         }
-        span { class: "flex items-center gap-2", title: beets_hint,
-          span { class: "w-2 h-2 rounded-full {beets_dot}" }
-          "BEETS {beets_chip}"
+        span { class: CHIP, title: beets_hint,
+          span { class: "w-1.5 h-1.5 rounded-full {beets_dot}" }
+          span { class: LABEL, "BEETS {beets_chip}" }
         }
         span {
-          class: "flex items-center gap-2",
+          class: CHIP,
           title: nav_hint.unwrap_or_default(),
           span {
             class: format!(
-                "w-2 h-2 rounded-full {}",
+                "w-1.5 h-1.5 rounded-full {}",
                 if health.navidrome_online { "bg-blue-400 animate-pulse" } else { "bg-red-500" },
             ),
           }
-          if health.navidrome_online {
-            "NAVIDROME ONLINE"
-          } else if user_not_linked {
-            "NAVIDROME NOT LINKED"
-          } else {
-            "NAVIDROME OFFLINE"
+          span { class: LABEL,
+            if health.navidrome_online {
+              "NAVIDROME ONLINE"
+            } else if user_not_linked {
+              "NAVIDROME NOT LINKED"
+            } else {
+              "NAVIDROME OFFLINE"
+            }
           }
         }
       }

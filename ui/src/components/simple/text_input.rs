@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 /// The look of the app's form fields, text inputs and selects alike.
-pub const FIELD_CLASS: &str = "w-full p-2 rounded bg-beet-dark border border-white/10 focus:border-beet-accent focus:outline-none text-white font-mono";
+pub const FIELD_CLASS: &str = "w-full px-3 py-2 rounded-md bg-beet-input border border-transparent hover:border-white/20 focus:border-white focus:outline-none text-white";
 
 /// How a text field looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -11,7 +11,7 @@ pub enum FieldLook {
     Form,
     /// A smaller field in a list item being edited.
     Compact,
-    /// The login form's larger field that glows on focus.
+    /// The login form's larger field.
     Login,
 }
 
@@ -19,8 +19,8 @@ impl FieldLook {
     fn class(self) -> &'static str {
         match self {
             FieldLook::Form => FIELD_CLASS,
-            FieldLook::Compact => "p-2 rounded bg-beet-dark border border-white/10 focus:border-beet-accent text-white font-mono text-sm",
-            FieldLook::Login => "w-full bg-beet-dark border border-white/10 rounded p-3 text-white focus:outline-none focus:border-beet-accent focus:shadow-[0_0_10px_rgba(217,70,239,0.3)] transition-all font-mono",
+            FieldLook::Compact => "px-3 py-2 rounded-md bg-beet-input border border-transparent focus:border-white focus:outline-none text-white text-sm",
+            FieldLook::Login => "w-full bg-beet-input border border-white/10 rounded-md p-3 text-white hover:border-white/40 focus:outline-none focus:border-white transition-all",
         }
     }
 }
@@ -137,11 +137,11 @@ mod tests {
             (FieldLook::Form, FIELD_CLASS),
             (
                 FieldLook::Compact,
-                "p-2 rounded bg-beet-dark border border-white/10 focus:border-beet-accent text-white font-mono text-sm",
+                "px-3 py-2 rounded-md bg-beet-input border border-transparent focus:border-white focus:outline-none text-white text-sm",
             ),
             (
                 FieldLook::Login,
-                "w-full bg-beet-dark border border-white/10 rounded p-3 text-white focus:outline-none focus:border-beet-accent focus:shadow-[0_0_10px_rgba(217,70,239,0.3)] transition-all font-mono",
+                "w-full bg-beet-input border border-white/10 rounded-md p-3 text-white hover:border-white/40 focus:outline-none focus:border-white transition-all",
             ),
         ] {
             let html = render_look(look);

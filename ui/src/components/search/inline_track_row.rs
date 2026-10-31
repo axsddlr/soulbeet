@@ -25,24 +25,24 @@ pub fn InlineTrackRow(props: Props) -> Element {
 
     rsx! {
         div {
-            class: "flex items-center gap-3 p-2 hover:bg-white/5 rounded transition-colors",
+            class: "grid grid-cols-[1.5rem_minmax(0,1fr)_auto_2.25rem] items-center gap-3 md:gap-4 px-2 py-1.5 hover:bg-white/10 rounded-md transition-colors",
 
             // Track number (1-based display)
             span {
-                class: "text-xs font-mono text-gray-600 w-6 text-right shrink-0",
+                class: "text-sm text-muted text-right tabular-nums",
                 "{track_number}"
             }
 
             // Title
             span {
-                class: "text-sm font-mono text-gray-300 flex-grow truncate",
+                class: "text-sm md:text-base text-white truncate",
                 "{track.title}"
             }
 
             // Duration (conditional)
-            if let Some(duration) = &track.duration {
-                span {
-                    class: "text-xs font-mono text-gray-500 shrink-0",
+            span {
+                class: "text-sm text-muted tabular-nums",
+                if let Some(duration) = &track.duration {
                     "{duration}"
                 }
             }
