@@ -604,7 +604,7 @@ pub fn Search() -> Element {
             span { class: "text-beet-accent", "Music." }
           }
           p { class: "text-muted text-sm",
-            "Search & Download // Manage Your Library"
+            "Search & Download · Manage Your Library"
           }
         }
 
@@ -668,7 +668,7 @@ pub fn Search() -> Element {
               }
               SearchTypeToggle { search_type }
               Button {
-                class: "ml-1 whitespace-nowrap",
+                class: if search.read().is_empty() { "ml-1 whitespace-nowrap opacity-80!" } else { "ml-1 whitespace-nowrap" },
                 disabled: loading() || search.read().is_empty(),
                 onclick: move |_| {
                     spawn(perform_search());
@@ -698,7 +698,7 @@ pub fn Search() -> Element {
             SearchTypeToggle { search_type }
 
             Button {
-              class: "whitespace-nowrap px-4",
+              class: if search.read().is_empty() { "whitespace-nowrap px-4 opacity-80!" } else { "whitespace-nowrap px-4" },
               disabled: loading() || search.read().is_empty(),
               onclick: move |_| {
                   spawn(perform_search());
