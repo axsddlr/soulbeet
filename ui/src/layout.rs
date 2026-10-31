@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn Layout(children: Element) -> Element {
     rsx! {
-      div { class: "relative grid grid-rows-[minmax(0,1fr)_auto_auto] h-dvh w-full bg-black text-white overflow-hidden",
+      div { class: "relative grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto_auto] h-dvh w-full bg-black text-white overflow-hidden",
         {children}
       }
     }
