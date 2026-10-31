@@ -60,6 +60,20 @@ pub(crate) fn library_db_in(root: &Path, dir: Option<&Path>) -> std::path::PathB
     dir.join(format!("{name}-{hash:016x}.db"))
 }
 
+type Linker = fn(&Path, &Path) -> std::io::Result<()>;
+
+fn link_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::hard_link(from, to)
+}
+
+fn migrate_with(_legacy: &Path, _new: &Path, _link: Linker) -> bool {
+    false
+}
+
+fn choose_db(_root: &Path, db: &Path, _link: Linker) -> std::path::PathBuf {
+    db.to_path_buf()
+}
+
 /// Creates the db's directory and copies the legacy db over once.
 fn prepare_db(root: &Path, db: &Path) {
     if let Some(parent) = db.parent() {
@@ -328,6 +342,53 @@ mod tests {
         // The target directory does not exist, so the copy fails.
         assert!(!migrate_legacy_db(&legacy, &t.path().join("missing/new.db")));
         assert_eq!(std::fs::read_dir(t.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_failed_migration_keeps_the_legacy_db() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("music");
+        std::fs::create_dir(&root).unwrap();
+        let legacy = root.join(".beets_library.db");
+        std::fs::write(&legacy, b"old").unwrap();
+        // The new db's parent is a file, so it can be neither created nor copied to.
+        let blocker = t.path().join("blocker");
+        std::fs::write(&blocker, b"").unwrap();
+        let db = blocker.join("x.db");
+        assert_eq!(choose_db(&root, &db, link_file), legacy);
+    }
+
+    #[test]
+    fn a_successful_migration_uses_the_new_db() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("music");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join(".beets_library.db"), b"old").unwrap();
+        let db = t.path().join("dir").join("x.db");
+        assert_eq!(choose_db(&root, &db, link_file), db);
+        assert_eq!(std::fs::read(&db).unwrap(), b"old");
+    }
+
+    #[test]
+    fn no_legacy_db_uses_the_new_path() {
+        let t = tempfile::tempdir().unwrap();
+        let db = t.path().join("x.db");
+        assert_eq!(choose_db(&t.path().join("music"), &db, link_file), db);
+    }
+
+    #[test]
+    fn migration_falls_back_to_rename_when_linking_fails() {
+        fn no_links(_: &Path, _: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }
+        let t = tempfile::tempdir().unwrap();
+        let legacy = t.path().join("legacy.db");
+        let new = t.path().join("new.db");
+        std::fs::write(&legacy, b"old").unwrap();
+        assert!(migrate_with(&legacy, &new, no_links));
+        assert_eq!(std::fs::read(&new).unwrap(), b"old");
+        assert!(legacy.exists());
+        assert_eq!(std::fs::read_dir(t.path()).unwrap().count(), 2);
     }
 
     #[test]
