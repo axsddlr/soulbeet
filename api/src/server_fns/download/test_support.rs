@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use shared::download::{
     DownloadProgress, DownloadState, DownloadableGroup, DownloadableItem, EnqueueStatus,
-    QueuedDownload, SearchResult,
+    QueuedDownload, SearchResult, SearchState,
 };
 use shared::metadata::{Album, Track};
 use soulbeet::error::{Result as SoulResult, SoulseekError};
@@ -84,8 +84,8 @@ pub enum ScriptedOutcome {
 }
 
 /// Answers each enqueue from a scripted list, then rejects everything after
-/// the script runs out. Records every destination and cancellation, and
-/// lists whatever transfers the test sets. Each stub has its own backend id,
+/// the script runs out. Records every destination, cancellation and search
+/// (a search finds nothing), and lists whatever transfers the test sets. Each stub has its own backend id,
 /// so the registry keys of concurrent tests never collide.
 pub struct StubBackend {
     id: &'static str,
@@ -94,6 +94,7 @@ pub struct StubBackend {
     destinations: Mutex<Vec<String>>,
     listing: Mutex<Vec<DownloadProgress>>,
     hold: Mutex<Option<Hold>>,
+    searches: Mutex<Vec<bool>>,
 }
 
 /// Holds every `download` call until released, after announcing it.
@@ -114,7 +115,13 @@ impl StubBackend {
             destinations: Mutex::new(Vec::new()),
             listing: Mutex::new(Vec::new()),
             hold: Mutex::new(None),
+            searches: Mutex::new(Vec::new()),
         })
+    }
+
+    /// The `require_flac` of every `start_search` call, in order.
+    pub fn searches(&self) -> Vec<bool> {
+        self.searches.lock().unwrap().clone()
     }
 
     /// Every `cancel_download` call, in order.
@@ -186,11 +193,22 @@ impl DownloadBackend for StubBackend {
     fn name(&self) -> &'static str {
         "Stub"
     }
-    async fn start_search(&self, _album: Option<&Album>, _tracks: &[Track]) -> SoulResult<String> {
+    async fn start_search(
+        &self,
+        _album: Option<&Album>,
+        _tracks: &[Track],
+        require_flac: bool,
+    ) -> SoulResult<String> {
+        self.searches.lock().unwrap().push(require_flac);
         Ok("search".to_string())
     }
-    async fn poll_search(&self, _search_id: &str) -> SoulResult<SearchResult> {
-        unreachable!("failover never searches")
+    async fn poll_search(&self, search_id: &str) -> SoulResult<SearchResult> {
+        Ok(SearchResult {
+            search_id: search_id.to_string(),
+            groups: Vec::new(),
+            has_more: false,
+            state: SearchState::Completed,
+        })
     }
     async fn download(
         &self,

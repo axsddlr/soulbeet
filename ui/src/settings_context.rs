@@ -82,6 +82,14 @@ impl Settings {
             .unwrap_or_default()
     }
 
+    /// Whether searches keep only FLAC files.
+    pub fn require_flac_only(&self) -> bool {
+        self.state
+            .read()
+            .as_ref()
+            .is_some_and(|s| s.require_flac_only)
+    }
+
     /// Get the list of available metadata providers.
     pub fn providers(&self) -> Vec<ProviderInfo> {
         self.providers.read().clone()

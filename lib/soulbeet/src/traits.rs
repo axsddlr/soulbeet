@@ -42,7 +42,14 @@ pub trait DownloadBackend: Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
 
-    async fn start_search(&self, album: Option<&Album>, tracks: &[Track]) -> Result<String>;
+    /// Starts a search for `tracks` (of `album`, when one is given). With
+    /// `require_flac`, only FLAC files are considered as results.
+    async fn start_search(
+        &self,
+        album: Option<&Album>,
+        tracks: &[Track],
+        require_flac: bool,
+    ) -> Result<String>;
     async fn poll_search(&self, search_id: &str) -> Result<SearchResult>;
     /// Enqueue `items` into `destination`, a folder under the backend's
     /// download directory shared by every item of the call.

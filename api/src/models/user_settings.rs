@@ -24,6 +24,8 @@ pub struct UserSettings {
     pub discovery_navidrome_playlist_id: Option<String>,
     pub discovery_last_generated_at: Option<String>,
     pub default_download_folder_id: Option<String>,
+    /// Search results keep only FLAC files.
+    pub require_flac_only: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -60,6 +62,8 @@ pub struct UpdateUserSettings {
     pub discovery_playlist_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_download_folder_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_flac_only: Option<bool>,
 }
 
 #[cfg(feature = "server")]
@@ -93,6 +97,7 @@ impl UserSettings {
             discovery_navidrome_playlist_id: None,
             discovery_last_generated_at: None,
             default_download_folder_id: None,
+            require_flac_only: false,
         }))
     }
 
@@ -138,11 +143,14 @@ impl UserSettings {
         let default_folder = update
             .default_download_folder_id
             .or(current.default_download_folder_id);
+        let require_flac_only = update
+            .require_flac_only
+            .unwrap_or(current.require_flac_only);
 
         sqlx::query(
             r#"
-            INSERT INTO user_settings (user_id, default_metadata_provider, last_search_type, auto_delete_enabled, lastfm_api_key, lastfm_username, discovery_promote_threshold, navidrome_banner_dismissed, listenbrainz_username, listenbrainz_token, discovery_enabled, discovery_folder_id, discovery_track_count, discovery_lifetime_days, discovery_profiles, discovery_playlist_name, default_download_folder_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_settings (user_id, default_metadata_provider, last_search_type, auto_delete_enabled, lastfm_api_key, lastfm_username, discovery_promote_threshold, navidrome_banner_dismissed, listenbrainz_username, listenbrainz_token, discovery_enabled, discovery_folder_id, discovery_track_count, discovery_lifetime_days, discovery_profiles, discovery_playlist_name, default_download_folder_id, require_flac_only)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 default_metadata_provider = excluded.default_metadata_provider,
                 last_search_type = excluded.last_search_type,
@@ -159,7 +167,8 @@ impl UserSettings {
                 discovery_lifetime_days = excluded.discovery_lifetime_days,
                 discovery_profiles = excluded.discovery_profiles,
                 discovery_playlist_name = excluded.discovery_playlist_name,
-                default_download_folder_id = excluded.default_download_folder_id
+                default_download_folder_id = excluded.default_download_folder_id,
+                require_flac_only = excluded.require_flac_only
             "#,
         )
         .bind(user_id)
@@ -179,6 +188,7 @@ impl UserSettings {
         .bind(&disc_profiles)
         .bind(&disc_name)
         .bind(&default_folder)
+        .bind(require_flac_only)
         .execute(&*DB)
         .await
         .map_err(|e| e.to_string())?;

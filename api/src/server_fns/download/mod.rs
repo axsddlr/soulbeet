@@ -223,6 +223,11 @@ pub async fn download(req: DownloadRequest) -> Result<Vec<QueuedDownload>, Serve
             .await
             .map_err(server_error)?
             .ok_or_else(|| refusal_error("Folder not found"))?;
+    // Failover re-searches follow it like the search the picker came from.
+    let require_flac = crate::models::user_settings::UserSettings::get(&auth.0.sub)
+        .await
+        .map_err(server_error)?
+        .require_flac_only;
 
     let target_path_buf = std::path::Path::new(&folder.path).to_path_buf();
     if let Err(e) = tokio::fs::create_dir_all(&target_path_buf).await {
@@ -243,7 +248,7 @@ pub async fn download(req: DownloadRequest) -> Result<Vec<QueuedDownload>, Serve
         manual_batch_label(&req.items),
         target_path_buf,
     );
-    let queued = queue_detached(backend, req.items, fresh, username, req.backend)
+    let queued = queue_detached(backend, req.items, fresh, username, req.backend, require_flac)
         .await
         .map_err(server_error)?;
     match queued {
@@ -277,8 +282,17 @@ async fn queue_detached(
     fresh: BatchRef,
     username: String,
     backend_id: Option<String>,
+    require_flac: bool,
 ) -> Result<Queued, tokio::task::JoinError> {
-    tokio::spawn(queue_and_watch(backend, items, fresh, username, backend_id)).await
+    tokio::spawn(queue_and_watch(
+        backend,
+        items,
+        fresh,
+        username,
+        backend_id,
+        require_flac,
+    ))
+    .await
 }
 
 /// Failover for a manual request's monitor. The picker sends no other
@@ -297,7 +311,8 @@ fn manual_pool(
 
 /// Claims and enqueues a manual request's files, shows their rows, and hands
 /// the enqueued ones to a monitor: the running batch's when the request
-/// joined one, else a new one.
+/// joined one, else a new one. `require_flac` is the user's "Require FLAC
+/// only" setting, which the monitor's failover re-searches keep to.
 #[cfg(feature = "server")]
 async fn queue_and_watch(
     backend: Arc<dyn DownloadBackend>,
@@ -305,6 +320,7 @@ async fn queue_and_watch(
     fresh: BatchRef,
     username: String,
     backend_id: Option<String>,
+    require_flac: bool,
 ) -> Queued {
     let requested = items.clone();
     let enq = enqueue_request(&backend, items, fresh).await;
@@ -386,7 +402,7 @@ async fn queue_and_watch(
             let pool = manual_pool(
                 &enqueued,
                 &requested,
-                Arc::new(auto_download::BackendFinder),
+                Arc::new(auto_download::BackendFinder { require_flac }),
             );
             let task_username = username.clone();
             let task_cancellation = register_user_task(&username).await;
@@ -542,6 +558,7 @@ mod tests {
             fresh,
             "detached-request".to_string(),
             None,
+            false,
         ));
         reached.notified().await;
         handler.abort();
