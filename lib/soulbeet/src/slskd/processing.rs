@@ -11,6 +11,8 @@ pub fn process_search_responses(
     searched_artist: &str,
     searched_album: Option<&str>,
     expected_tracks: &[&str],
+    // Strict mode: drop every file that is not FLAC before matching.
+    require_flac: bool,
 ) -> Vec<AlbumResult> {
     const MIN_SCORE_THRESHOLD: f64 = 0.6;
     let scored_files: Vec<(MatchResult, SearchResult)> = responses
@@ -18,6 +20,9 @@ pub fn process_search_responses(
         .flat_map(|resp| {
             resp.files.iter().filter_map(|file| {
                 let path = Path::new(&file.filename);
+                if require_flac && !is_flac_path(path) {
+                    return None;
+                }
                 if path.extension().is_some() && !is_audio_path(path) {
                     return None;
                 }
@@ -51,6 +56,14 @@ pub fn process_search_responses(
         .collect();
 
     find_best_albums(&scored_files, expected_tracks)
+}
+
+/// A file whose extension is `flac`, in any case. One without an extension
+/// is not.
+fn is_flac_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("flac"))
 }
 
 fn find_best_albums(
@@ -150,4 +163,111 @@ fn find_best_albums(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slskd::models::SearchResponseFile;
+
+    const ARTIST: &str = "Kowloon";
+    const ALBUM: &str = "Come Over";
+    const TRACKS: [&str; 2] = ["Northern Line", "Glass Atlas"];
+
+    fn file(name: &str) -> SearchResponseFile {
+        SearchResponseFile {
+            filename: name.to_string(),
+            size: 27_213_250,
+            bit_rate: None,
+            length: Some(200),
+            sample_rate: Some(44100),
+            bit_depth: Some(16),
+        }
+    }
+
+    fn peer(username: &str, files: &[&str]) -> SearchResponse {
+        SearchResponse {
+            username: username.to_string(),
+            files: files.iter().map(|f| file(f)).collect(),
+            has_free_upload_slot: true,
+            upload_speed: 1000,
+            queue_length: 0,
+        }
+    }
+
+    fn album_files(folder: &str, ext: &str) -> Vec<String> {
+        TRACKS
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!("Music\\{ARTIST} - {ALBUM}\\{folder}\\0{} - {t}{ext}", i + 1))
+            .collect()
+    }
+
+    fn search(responses: &[SearchResponse], require_flac: bool) -> Vec<AlbumResult> {
+        process_search_responses(responses, ARTIST, Some(ALBUM), &TRACKS, require_flac)
+    }
+
+    fn sources(albums: &[AlbumResult]) -> Vec<String> {
+        let mut users: Vec<String> = albums.iter().map(|a| a.username.clone()).collect();
+        users.sort();
+        users.dedup();
+        users
+    }
+
+    fn filenames(albums: &[AlbumResult]) -> Vec<String> {
+        let mut names: Vec<String> = albums
+            .iter()
+            .flat_map(|a| a.tracks.iter().map(|t| t.base.filename.clone()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn refs(names: &[String]) -> Vec<&str> {
+        names.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn without_the_flag_flac_and_mp3_peers_both_stay() {
+        let flac = album_files("FLAC", ".flac");
+        let mp3 = album_files("MP3", ".mp3");
+        let responses = [peer("lossless", &refs(&flac)), peer("lossy", &refs(&mp3))];
+
+        assert_eq!(
+            sources(&search(&responses, false)),
+            vec!["lossless", "lossy"]
+        );
+    }
+
+    #[test]
+    fn requiring_flac_drops_an_mp3_only_peer() {
+        let flac = album_files("FLAC", ".flac");
+        let mp3 = album_files("MP3", ".mp3");
+        let responses = [peer("lossless", &refs(&flac)), peer("lossy", &refs(&mp3))];
+
+        assert_eq!(sources(&search(&responses, true)), vec!["lossless"]);
+    }
+
+    #[test]
+    fn requiring_flac_keeps_only_the_flac_files_of_a_mixed_folder() {
+        // One folder holding the first track as FLAC (upper-case extension)
+        // and the second only as MP3.
+        let mixed = vec![
+            album_files("Mixed", ".FLAC").remove(0),
+            album_files("Mixed", ".mp3").remove(1),
+        ];
+        let responses = [peer("mixed", &refs(&mixed))];
+
+        assert_eq!(filenames(&search(&responses, false)).len(), 2);
+        assert_eq!(filenames(&search(&responses, true)), vec![mixed[0].clone()]);
+    }
+
+    #[test]
+    fn requiring_flac_drops_a_file_without_an_extension() {
+        let bare = album_files("Bare", "");
+        let responses = [peer("bare", &refs(&bare))];
+
+        assert_eq!(sources(&search(&responses, false)), vec!["bare"]);
+        assert!(search(&responses, true).is_empty());
+    }
 }

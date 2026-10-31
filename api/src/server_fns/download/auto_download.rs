@@ -20,6 +20,8 @@ use crate::globals::{get_or_create_user_channel, register_user_task, unregister_
 #[cfg(feature = "server")]
 use crate::models::folder::Folder;
 #[cfg(feature = "server")]
+use crate::models::user_settings::UserSettings;
+#[cfg(feature = "server")]
 use crate::services::{available_download_backends, download_backend};
 #[cfg(feature = "server")]
 use crate::transfer_registry::{BatchRef, TransferOwner};
@@ -72,15 +74,17 @@ pub enum AutoDownloadResult {
 }
 
 /// One backend's results for a search, scored by the backend, or nothing
-/// when it fails or finds nothing within `SEARCH_TIMEOUT`.
+/// when it fails or finds nothing within `SEARCH_TIMEOUT`. With
+/// `require_flac`, only FLAC files are results.
 #[cfg(feature = "server")]
 pub(super) async fn search_backend(
     id: &str,
     backend: &Arc<dyn DownloadBackend>,
     album: Option<&Album>,
     tracks: &[Track],
+    require_flac: bool,
 ) -> Vec<DownloadableGroup> {
-    try_search_backend(id, backend, album, tracks)
+    try_search_backend(id, backend, album, tracks, require_flac)
         .await
         .unwrap_or_default()
 }
@@ -94,8 +98,9 @@ async fn try_search_backend(
     backend: &Arc<dyn DownloadBackend>,
     album: Option<&Album>,
     tracks: &[Track],
+    require_flac: bool,
 ) -> SoulResult<Vec<DownloadableGroup>> {
-    let search_id = match backend.start_search(album, tracks).await {
+    let search_id = match backend.start_search(album, tracks, require_flac).await {
         Ok(sid) => sid,
         Err(e) => {
             warn!("Backend {} search start failed: {}", id, e);
@@ -149,8 +154,12 @@ async fn try_search_backend(
 
 /// Re-searches a failing track on the backend its batch downloads from,
 /// passing on a search that could not start or answer as an error.
+/// `require_flac` is the batch owner's "Require FLAC only" setting, so an
+/// alternate is never a format the original search would have dropped.
 #[cfg(feature = "server")]
-pub(super) struct BackendFinder;
+pub(super) struct BackendFinder {
+    pub require_flac: bool,
+}
 
 #[cfg(feature = "server")]
 #[async_trait::async_trait]
@@ -172,7 +181,7 @@ impl AlternateFinder for BackendFinder {
             mbid: None,
             release_mbid: None,
         };
-        try_search_backend(backend.id(), backend, None, &[track]).await
+        try_search_backend(backend.id(), backend, None, &[track], self.require_flac).await
     }
 }
 
@@ -194,6 +203,16 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
         Err(e) => {
             warn!("Folder lookup for auto-download failed: {e}");
             return Ok(AutoDownloadResult::Error("Folder not found".to_string()));
+        }
+    };
+    // Both the search and every failover re-search follow it.
+    let require_flac = match UserSettings::get(&auth.0.sub).await {
+        Ok(settings) => settings.require_flac_only,
+        Err(e) => {
+            warn!("Settings lookup for auto-download failed: {e}");
+            return Ok(AutoDownloadResult::Error(
+                "Could not load your settings".to_string(),
+            ));
         }
     };
 
@@ -275,7 +294,8 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
         let search_futures: Vec<_> = backends
             .iter()
             .map(|(id, backend)| async {
-                let groups = search_backend(id, backend, album.as_ref(), &tracks).await;
+                let groups =
+                    search_backend(id, backend, album.as_ref(), &tracks, require_flac).await;
                 (id.clone(), groups)
             })
             .collect();
@@ -516,7 +536,7 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
             task_username.clone(),
             batch,
         )
-        .with_failover(pool.with_finder(Arc::new(BackendFinder)));
+        .with_failover(pool.with_finder(Arc::new(BackendFinder { require_flac })));
         monitor.run().await;
         unregister_user_task(&task_username).await;
     });
@@ -524,4 +544,37 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
     Ok(AutoDownloadResult::Accepted {
         batch_id: batch_id_for_response,
     })
+}
+
+#[cfg(all(test, feature = "server"))]
+mod tests {
+    use super::*;
+    use crate::server_fns::download::test_support::StubBackend;
+
+    async fn research_flags(finder: BackendFinder) -> Vec<bool> {
+        let stub = StubBackend::new(Vec::new());
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        let found = finder.search(&backend, "Kowloon", "Two").await;
+        assert!(found.expect("the stub's search answers").is_empty());
+        stub.searches()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_flac_only_research_asks_the_backend_for_flac_only() {
+        assert_eq!(
+            research_flags(BackendFinder { require_flac: true }).await,
+            vec![true]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_research_without_the_setting_takes_any_format() {
+        assert_eq!(
+            research_flags(BackendFinder {
+                require_flac: false
+            })
+            .await,
+            vec![false]
+        );
+    }
 }

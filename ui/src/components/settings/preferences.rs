@@ -7,6 +7,10 @@ use crate::{friendly_error, FIELD_CLASS};
 pub fn PreferencesManager() -> Element {
     let mut settings = use_settings();
     let mut selected_provider = use_signal(|| settings.default_provider());
+    // The value being saved, shown until the save answers. Otherwise the
+    // switch reads the settings context, so it follows the saved value even
+    // when the settings arrive after this component mounts.
+    let mut pending_flac_only = use_signal(|| None::<bool>);
     let mut error = use_signal(String::new);
     let mut success_msg = use_signal(String::new);
     let mut saving = use_signal(|| false);
@@ -26,6 +30,27 @@ pub fn PreferencesManager() -> Element {
         .find(|p| p.id == selected_provider())
         .map(|p| !p.available)
         .unwrap_or(false);
+
+    let require_flac_only = pending_flac_only().unwrap_or_else(|| settings.require_flac_only());
+
+    // Saved on its own, as soon as it is flipped.
+    let toggle_require_flac = move |_| async move {
+        if pending_flac_only().is_some() {
+            return;
+        }
+        error.set(String::new());
+        success_msg.set(String::new());
+        let new_val = !settings.require_flac_only();
+        pending_flac_only.set(Some(new_val));
+        let update = api::UpdateUserSettings {
+            require_flac_only: Some(new_val),
+            ..Default::default()
+        };
+        if let Err(e) = settings.update(update).await {
+            error.set(friendly_error(&e));
+        }
+        pending_flac_only.set(None);
+    };
 
     let handle_save = move |_| async move {
         error.set(String::new());
@@ -105,6 +130,31 @@ pub fn PreferencesManager() -> Element {
                     } else {
                         p { class: "text-xs text-muted/80 mt-1",
                             "Choose which service to use for searching albums and tracks."
+                        }
+                    }
+                }
+
+                div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
+                    div {
+                        p { class: "text-sm text-white font-medium", "Require FLAC only" }
+                        p { class: "text-xs text-muted/80 mt-0.5",
+                            "Only offer and download FLAC files. Sources without FLAC are skipped."
+                        }
+                    }
+                    button {
+                        class: format!(
+                            "relative w-11 h-6 rounded-full cursor-pointer transition-colors {}",
+                            if require_flac_only { "bg-beet-leaf" } else { "bg-white/20" }
+                        ),
+                        role: "switch",
+                        aria_checked: "{require_flac_only}",
+                        aria_label: "Require FLAC only",
+                        onclick: toggle_require_flac,
+                        span {
+                            class: format!(
+                                "absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform {}",
+                                if require_flac_only { "translate-x-5" } else { "" }
+                            ),
                         }
                     }
                 }
