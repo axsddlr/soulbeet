@@ -95,16 +95,21 @@ impl DiscoveryCandidateRow {
         artist: &str,
         track: &str,
     ) -> Result<(), String> {
-        sqlx::query(
-            "UPDATE discovery_candidates SET used = 1 WHERE user_id = ? AND profile = ? AND lower(artist) = lower(?) AND lower(track) = lower(?)",
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, artist, track FROM discovery_candidates WHERE user_id = ? AND profile = ?",
         )
         .bind(user_id)
         .bind(profile)
-        .bind(artist)
-        .bind(track)
-        .execute(&*DB)
+        .fetch_all(&*DB)
         .await
         .map_err(|e| e.to_string())?;
+        for id in super::discovery_history::matching_ids(rows, artist, track) {
+            sqlx::query("UPDATE discovery_candidates SET used = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&*DB)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 

@@ -130,7 +130,7 @@ impl User {
 /// If legacy case-variant duplicates exist, prefer the exact-case match, then
 /// the oldest row.
 #[cfg(feature = "server")]
-const FIND_BY_USERNAME: &str = "SELECT * FROM users WHERE username = ? ORDER BY rowid LIMIT 1";
+const FIND_BY_USERNAME: &str = "SELECT * FROM users WHERE username = ? COLLATE NOCASE      ORDER BY (username = ?) DESC, rowid LIMIT 1";
 
 #[cfg(feature = "server")]
 async fn find_by_username(
@@ -138,6 +138,7 @@ async fn find_by_username(
     username: &str,
 ) -> Result<Option<User>, String> {
     sqlx::query_as::<_, User>(FIND_BY_USERNAME)
+        .bind(username)
         .bind(username)
         .fetch_optional(pool)
         .await
@@ -150,6 +151,10 @@ async fn create_in(
     username: &str,
     password: &str,
 ) -> Result<User, String> {
+    if find_by_username(pool, username).await?.is_some() {
+        return Err("Username already exists".to_string());
+    }
+
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let password_hash = argon2
@@ -177,6 +182,17 @@ async fn update_username_in(
     id: &str,
     new_username: &str,
 ) -> Result<(), String> {
+    let clash: Option<String> =
+        sqlx::query_scalar("SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ?")
+            .bind(new_username)
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if clash.is_some() {
+        return Err("Username already exists".to_string());
+    }
+
     sqlx::query("UPDATE users SET username = ? WHERE id = ?")
         .bind(new_username)
         .bind(id)

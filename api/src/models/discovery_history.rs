@@ -21,13 +21,13 @@ pub struct DiscoveryHistoryRow {
 /// `lower()` only folds ASCII, which never matches `to_lowercase()` keys for
 /// non-ASCII names (upstream #94).
 pub fn fold_key(artist: &str, track: &str) -> String {
-    format!("{}:{}", artist.to_ascii_lowercase(), track.to_ascii_lowercase())
+    format!("{}:{}", artist.to_lowercase(), track.to_lowercase())
 }
 
 /// Ids of `(id, artist, track)` rows whose folded key equals the folded
 /// `artist`/`track`.
 #[cfg(feature = "server")]
-fn matching_ids(rows: Vec<(String, String, String)>, artist: &str, track: &str) -> Vec<String> {
+pub(crate) fn matching_ids(rows: Vec<(String, String, String)>, artist: &str, track: &str) -> Vec<String> {
     let wanted = fold_key(artist, track);
     rows.into_iter()
         .filter(|(_, a, t)| fold_key(a, t) == wanted)
@@ -60,39 +60,43 @@ impl DiscoveryHistoryRow {
         track: &str,
         outcome: &str,
     ) -> Result<(), String> {
-        sqlx::query(
-            "UPDATE discovery_history SET outcome = ? WHERE user_id = ? AND lower(artist) = lower(?) AND lower(track) = lower(?)"
-        )
-        .bind(outcome).bind(user_id).bind(artist).bind(track)
-        .execute(&*DB).await.map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Check if a track was ever suggested to this user (in any profile, any batch).
-    pub async fn was_suggested(user_id: &str, artist: &str, track: &str) -> Result<bool, String> {
-        let count = sqlx::query_scalar::<_, i32>(
-            "SELECT COUNT(*) FROM discovery_history WHERE user_id = ? AND lower(artist) = lower(?) AND lower(track) = lower(?)"
-        )
-        .bind(user_id).bind(artist).bind(track)
-        .fetch_one(&*DB).await.map_err(|e| e.to_string())?;
-        Ok(count > 0)
-    }
-
-    /// Build a set of all previously suggested track keys (lowercased "artist:track") for fast lookup.
-    pub async fn get_suggested_keys(
-        user_id: &str,
-    ) -> Result<std::collections::HashSet<String>, String> {
-        let rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT lower(artist), lower(track) FROM discovery_history WHERE user_id = ?",
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, artist, track FROM discovery_history WHERE user_id = ?",
         )
         .bind(user_id)
         .fetch_all(&*DB)
         .await
         .map_err(|e| e.to_string())?;
-        Ok(rows
-            .into_iter()
-            .map(|(a, t)| format!("{}:{}", a, t))
-            .collect())
+        for id in matching_ids(rows, artist, track) {
+            sqlx::query("UPDATE discovery_history SET outcome = ? WHERE id = ?")
+                .bind(outcome)
+                .bind(id)
+                .execute(&*DB)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Check if a track was ever suggested to this user (in any profile, any batch).
+    pub async fn was_suggested(user_id: &str, artist: &str, track: &str) -> Result<bool, String> {
+        Ok(Self::get_suggested_keys(user_id)
+            .await?
+            .contains(&fold_key(artist, track)))
+    }
+
+    /// Build a set of all previously suggested track keys (see [`fold_key`]) for fast lookup.
+    pub async fn get_suggested_keys(
+        user_id: &str,
+    ) -> Result<std::collections::HashSet<String>, String> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT artist, track FROM discovery_history WHERE user_id = ?",
+        )
+        .bind(user_id)
+        .fetch_all(&*DB)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(rows.into_iter().map(|(a, t)| fold_key(&a, &t)).collect())
     }
 }
 
