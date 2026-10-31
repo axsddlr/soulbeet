@@ -24,10 +24,10 @@ pub(crate) fn ConnectionStatusRow(props: ConnectionStatusRowProps) -> Element {
             h3 { class: "text-sm font-semibold text-white mb-3", "{props.label}" }
             div { class: "flex items-center gap-2 mb-2",
                 span { class: "w-2 h-2 rounded-full shrink-0 {props.dot_class}" }
-                span { class: "text-xs font-mono text-white/80", "{props.summary}" }
+                span { class: "text-xs text-white/80", "{props.summary}" }
             }
             if let Some(note) = &props.note {
-                p { class: "text-xs text-muted font-mono", "{note}" }
+                p { class: "text-xs text-muted", "{note}" }
             }
             if let Some(details) = props.details {
                 Disclosure { class: "mt-2", label: "details", {details} }
@@ -74,7 +74,7 @@ pub(crate) fn beets_row(h: &ImporterHealth) -> BeetsRow {
 #[component]
 pub(crate) fn ImporterDetails(health: ImporterHealth) -> Element {
     rsx! {
-        div { class: "mt-2 space-y-3 text-xs font-mono",
+        div { class: "mt-2 space-y-3 text-xs",
             if !health.issues.is_empty() {
                 ul { class: "space-y-2",
                     for issue in health.issues.iter() {

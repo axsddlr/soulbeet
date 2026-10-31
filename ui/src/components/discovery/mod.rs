@@ -125,12 +125,12 @@ pub fn DiscoveryOverview() -> Element {
 
             match info {
                 None => rsx! {
-                    p { class: "text-muted/80 font-mono text-sm", "Loading..." }
+                    p { class: "text-muted/80 text-sm", "Loading..." }
                 },
                 Some(cfg) => {
                     if !cfg.enabled {
                         rsx! {
-                            p { class: "text-muted/80 font-mono text-sm",
+                            p { class: "text-muted/80 text-sm",
                                 "Discovery is not enabled. Turn it on in Settings > Library."
                             }
                         }
@@ -148,7 +148,7 @@ pub fn DiscoveryOverview() -> Element {
                                                     let tc = cfg.track_counts.get(profile).copied().unwrap_or(10);
                                                     let lt = cfg.lifetime_days.get(profile).copied().unwrap_or(7);
                                                     rsx! {
-                                                        p { class: "text-muted text-xs font-mono",
+                                                        p { class: "text-muted text-xs",
                                                             span { class: "text-green-400", "{name}" }
                                                             span { class: "text-muted/60 ml-1", "({tc} tracks / {lt}d)" }
                                                         }
@@ -160,7 +160,7 @@ pub fn DiscoveryOverview() -> Element {
                                             {
                                                 let ago = format_relative_time(ts);
                                                 rsx! {
-                                                    p { class: "text-muted/80 text-xs font-mono mt-1",
+                                                    p { class: "text-muted/80 text-xs mt-1",
                                                         "Last generated: {ago}"
                                                     }
                                                 }
@@ -175,7 +175,7 @@ pub fn DiscoveryOverview() -> Element {
                                             if is_generating { "Generating..." } else { "Generate" }
                                         }
                                         if !start_error().is_empty() {
-                                            span { class: "text-xs font-mono text-red-400", "{start_error}" }
+                                            span { class: "text-xs text-red-400", "{start_error}" }
                                         }
                                     }
                                 }
@@ -203,7 +203,7 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
         GenerationStatus::Running => {
             rsx! {
                 div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
-                    p { class: "text-xs font-mono font-semibold text-white mb-3 uppercase tracking-wider",
+                    p { class: "text-sm font-bold text-white mb-3",
                         "Generating Discovery"
                     }
                     div { class: "space-y-2",
@@ -233,9 +233,9 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
                 .unwrap_or_default();
             rsx! {
                 div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
-                    p { class: "text-xs font-mono text-beet-leaf", "{total} tracks imported" }
+                    p { class: "text-xs text-beet-leaf", "{total} tracks imported" }
                     if !detail.is_empty() {
-                        p { class: "text-xs font-mono text-muted mt-1", "{detail}" }
+                        p { class: "text-xs text-muted mt-1", "{detail}" }
                     }
                 }
             }
@@ -244,7 +244,7 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
             let msg = progress.error.as_deref().unwrap_or("Unknown error");
             rsx! {
                 div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
-                    p { class: "text-xs font-mono text-red-400", "{msg}" }
+                    p { class: "text-xs text-red-400", "{msg}" }
                 }
             }
         }
@@ -274,10 +274,10 @@ fn render_profile_row(pp: &shared::navidrome::ProfileProgress) -> Element {
     rsx! {
         div { class: "flex items-center gap-3",
             span {
-                class: "text-xs font-mono px-1.5 py-0.5 rounded border {badge_class} w-24 text-center shrink-0",
+                class: "text-xs font-semibold px-2 py-0.5 rounded-full {badge_class} w-24 text-center shrink-0",
                 "{pp.profile}"
             }
-            span { class: "text-xs font-mono {phase_color} flex-1", "{phase_text}" }
+            span { class: "text-xs {phase_color} flex-1", "{phase_text}" }
             if show_bar {
                 div { class: "h-1.5 w-24 bg-white/10 rounded-full overflow-hidden relative shrink-0",
                     div {
@@ -285,12 +285,12 @@ fn render_profile_row(pp: &shared::navidrome::ProfileProgress) -> Element {
                         style: "width: {percent}%",
                     }
                 }
-                span { class: "text-xs font-mono text-muted w-12 text-right shrink-0",
+                span { class: "text-xs text-muted w-12 text-right shrink-0",
                     "{pp.current}/{pp.total}"
                 }
             }
             if pp.phase == ProfilePhase::Done {
-                span { class: "text-xs font-mono text-beet-leaf shrink-0", "100%" }
+                span { class: "text-xs text-beet-leaf shrink-0", "100%" }
             }
         }
     }
@@ -318,7 +318,7 @@ fn EngineReportView() -> Element {
         Disclosure { class: "mt-4", label: "engine reports", on_open: load,
             div { class: "mt-2 max-h-96 overflow-y-auto border border-white/10 rounded bg-beet-dark",
                 if entries().is_empty() {
-                    p { class: "p-3 text-xs font-mono text-muted/80",
+                    p { class: "p-3 text-xs text-muted/80",
                         "No engine reports available. Run discovery generation first."
                     }
                 } else {
@@ -342,11 +342,11 @@ fn EngineReportView() -> Element {
                                             }
                                         },
                                         span {
-                                            class: "text-xs font-mono px-1.5 py-0.5 rounded border {badge_class}",
+                                            class: "text-xs font-semibold px-2 py-0.5 rounded-full {badge_class}",
                                             "{badge_label}"
                                         }
-                                        span { class: "text-xs font-mono text-muted/80 flex-1", "{date}" }
-                                        span { class: "text-xs font-mono text-muted", "{count} candidates" }
+                                        span { class: "text-xs text-muted/80 flex-1", "{date}" }
+                                        span { class: "text-xs text-muted", "{count} candidates" }
                                         span { class: "text-xs text-muted/60 ml-1",
                                             if is_expanded { "\u{25BC}" } else { "\u{25B6}" }
                                         }
@@ -424,7 +424,7 @@ fn DiscoveryTrackList() -> Element {
 
     if active.is_empty() && history.is_empty() {
         return rsx! {
-            p { class: "text-muted/80 font-mono text-sm", "No discovery tracks" }
+            p { class: "text-muted/80 text-sm", "No discovery tracks" }
         };
     }
 
@@ -439,10 +439,10 @@ fn DiscoveryTrackList() -> Element {
                         div { class: "space-y-1.5",
                             div { class: "flex items-center gap-2",
                                 span {
-                                    class: "text-xs font-mono px-1.5 py-0.5 rounded border {badge_class}",
+                                    class: "text-xs font-semibold px-2 py-0.5 rounded-full {badge_class}",
                                     "{profile}"
                                 }
-                                span { class: "text-xs font-mono text-muted/80",
+                                span { class: "text-xs text-muted/80",
                                     "{count} tracks"
                                 }
                             }
@@ -461,7 +461,7 @@ fn DiscoveryTrackList() -> Element {
                                                     span { class: "text-muted mx-2", "-" }
                                                     span { class: "text-muted truncate", "{track.artist}" }
                                                     if let Some(r) = track.rating {
-                                                        span { class: "text-yellow-500 text-xs font-mono ml-2",
+                                                        span { class: "text-yellow-500 text-xs ml-2",
                                                             "({r})"
                                                         }
                                                     }
@@ -489,7 +489,7 @@ fn DiscoveryTrackList() -> Element {
                                                 }
                                             }
                                             if let Some(error) = promote_error {
-                                                p { class: "text-xs font-mono text-red-400 mt-1 break-words", "{error}" }
+                                                p { class: "text-xs text-red-400 mt-1 break-words", "{error}" }
                                             }
                                         }
                                     }
@@ -512,7 +512,7 @@ fn DiscoveryTrackList() -> Element {
                                     _ => ("", "text-muted/60"),
                                 };
                                 rsx! {
-                                    div { class: "flex items-center gap-2 px-2 py-1 text-xs font-mono text-muted/60",
+                                    div { class: "flex items-center gap-2 px-2 py-1 text-xs text-muted/60",
                                         span { class: "{color}", "{icon}" }
                                         span { "{track.artist} - {track.title}" }
                                         span { class: "text-muted/40 ml-auto",

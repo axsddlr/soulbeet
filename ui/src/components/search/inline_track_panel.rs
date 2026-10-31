@@ -52,8 +52,8 @@ pub fn InlineTrackPanel(props: Props) -> Element {
                 },
                 Some(tracks) => {
                     rsx! {
+                        // No inner scroll box: the main panel scrolls the whole list.
                         div {
-                            class: "max-h-[480px] overflow-y-auto",
                             div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)_auto_2.25rem] items-center gap-3 md:gap-4 px-2 pb-2 mb-2 border-b border-white/10 text-xs font-medium uppercase tracking-wider text-muted",
                                 span { class: "text-right", "#" }
                                 span { "Title" }

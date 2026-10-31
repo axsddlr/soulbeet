@@ -22,7 +22,7 @@ fn badge(state: &DownloadState) -> Badge {
         DownloadState::Queued => (
             "Queued".to_string(),
             "border-transparent opacity-60",
-            "border border-white/20 text-muted",
+            "bg-white/10 text-muted",
             "QUEUED",
         ),
         DownloadState::InProgress => (
@@ -40,7 +40,7 @@ fn badge(state: &DownloadState) -> Badge {
         DownloadState::ImportQueued(n) => (
             waiting_text(*n),
             "border-beet-leaf/30",
-            "border border-beet-leaf/40 text-beet-leaf",
+            "bg-beet-leaf/15 text-beet-leaf",
             "WAIT",
         ),
         DownloadState::Importing => (
@@ -186,7 +186,7 @@ pub fn DownloadItem(
           }
           div { class: "flex items-center gap-1.5 shrink-0",
             span {
-              class: "text-[10px] font-mono {badge_class} px-1.5 py-0.5 rounded uppercase cursor-help",
+              class: "text-[10px] font-bold tracking-wide {badge_class} px-2 py-0.5 rounded-full uppercase cursor-help",
               title: "{status_text}",
               "{badge_text}"
             }
@@ -194,7 +194,7 @@ pub fn DownloadItem(
               { let file_clone = file.clone();
               rsx! {
                 button {
-                  class: "text-[10px] font-mono px-1.5 py-0.5 rounded uppercase border border-transparent text-muted opacity-0 group-hover:opacity-100 hover:border-red-500/40 hover:text-red-400 transition-all cursor-pointer",
+                  class: "w-5 h-5 flex items-center justify-center rounded-full text-sm leading-none text-muted [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-500/20 hover:text-red-400 transition-all cursor-pointer",
                   title: "Cancel download",
                   onclick: move |evt: Event<MouseData>| {
                       evt.stop_propagation();
@@ -206,7 +206,7 @@ pub fn DownloadItem(
             }
           }
         }
-        div { class: "flex justify-between text-xs text-muted font-mono mb-1",
+        div { class: "flex justify-between text-xs text-muted tabular-nums mb-1",
           span {
             if matches!(state, DownloadState::InProgress) && file.speed > 0.0 {
               "{format_size(file.speed as u64)}/s"

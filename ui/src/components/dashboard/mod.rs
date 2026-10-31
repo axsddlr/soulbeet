@@ -70,7 +70,7 @@ pub fn StatsOverview(stats: LibraryStats) -> Element {
                 div { class: "space-y-2",
                     for (star_label, count, pct) in &star_rows {
                         div { class: "flex items-center gap-3",
-                            span { class: "text-xs font-mono text-muted w-14 shrink-0",
+                            span { class: "text-xs text-muted w-14 shrink-0",
                                 "{star_label}"
                             }
                             div { class: "flex-1 bg-white/10 rounded-full h-2 overflow-hidden",
@@ -79,7 +79,7 @@ pub fn StatsOverview(stats: LibraryStats) -> Element {
                                     style: "width: {pct}%",
                                 }
                             }
-                            span { class: "text-xs font-mono text-muted w-10 text-right shrink-0",
+                            span { class: "text-xs text-muted w-10 text-right shrink-0",
                                 "{count}"
                             }
                         }
@@ -107,7 +107,7 @@ pub fn StatsOverview(stats: LibraryStats) -> Element {
 fn StatCard(label: &'static str, value: String) -> Element {
     rsx! {
         div { class: "bg-beet-panel p-4 rounded-lg",
-            p { class: "text-xs font-mono text-muted uppercase tracking-wider mb-1", "{label}" }
+            p { class: "text-xs font-semibold text-muted mb-1", "{label}" }
             p { class: "text-2xl font-bold text-white", "{value}" }
         }
     }
@@ -126,13 +126,13 @@ pub fn DeletionHistoryTab() -> Element {
         div { class: "space-y-4",
             div { class: "flex items-center justify-between",
                 h3 { class: "text-sm font-semibold text-white", "Deletion History" }
-                p { class: "text-xs text-muted/80 font-mono",
+                p { class: "text-xs text-muted/80",
                     "Configure auto-delete in Settings > Library"
                 }
             }
 
             if items.is_empty() {
-                p { class: "text-muted/80 font-mono text-sm", "No deletion history yet." }
+                p { class: "text-muted/80 text-sm", "No deletion history yet." }
             } else {
                 div { class: "space-y-1 max-h-96 overflow-y-auto",
                     for item in items {
@@ -142,7 +142,7 @@ pub fn DeletionHistoryTab() -> Element {
                                 span { class: "text-muted mx-2", "-" }
                                 span { class: "text-muted truncate", "{item.artist}" }
                             }
-                            span { class: "text-xs font-mono ml-2 text-red-400", "Deleted" }
+                            span { class: "text-xs ml-2 text-red-400", "Deleted" }
                         }
                     }
                 }

@@ -109,12 +109,12 @@ pub fn UserManager() -> Element {
 
         // Local Messages
         if !error().is_empty() {
-          div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 font-mono text-sm",
+          div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 text-sm",
             "{error}"
           }
         }
         if !success_msg().is_empty() {
-          div { class: "mb-4 p-4 bg-green-900/20 border border-green-500/50 rounded text-green-400 font-mono text-sm",
+          div { class: "mb-4 p-4 bg-green-900/20 border border-green-500/50 rounded text-green-400 text-sm",
             "{success_msg}"
           }
         }
@@ -122,7 +122,7 @@ pub fn UserManager() -> Element {
         // Create User
         div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-4",
           div {
-            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
+            label { class: "block text-xs font-semibold text-muted mb-1.5",
               "New Username"
             }
             TextInput {
@@ -132,7 +132,7 @@ pub fn UserManager() -> Element {
             }
           }
           div {
-            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
+            label { class: "block text-xs font-semibold text-muted mb-1.5",
               "New Password"
             }
             TextInput {
@@ -154,7 +154,7 @@ pub fn UserManager() -> Element {
           "Existing Users"
         }
         if users.read().is_empty() {
-          p { class: "text-muted/80 font-mono italic", "No users found." }
+          p { class: "text-muted/80 italic", "No users found." }
         } else {
           ul { class: "space-y-2",
             {
@@ -219,7 +219,7 @@ pub fn UserManager() -> Element {
                                 span { class: "font-bold text-white", "{user.username}" }
                                 div { class: "flex gap-3",
                                   button {
-                                    class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| {
                                         editing_user_id.set(Some(id_edit_un.clone()));
                                         edit_mode.set(EditMode::Username);
@@ -228,7 +228,7 @@ pub fn UserManager() -> Element {
                                     "Rename"
                                   }
                                   button {
-                                    class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| {
                                         editing_user_id.set(Some(id_edit_pw.clone()));
                                         edit_mode.set(EditMode::Password);
@@ -237,7 +237,7 @@ pub fn UserManager() -> Element {
                                     "Password"
                                   }
                                   button {
-                                    class: "text-xs font-mono text-muted hover:text-red-400 transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs text-muted hover:text-red-400 transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| handle_delete_user(id_delete.clone()),
                                     "Delete"
                                   }

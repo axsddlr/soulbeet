@@ -120,6 +120,26 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
 
     let close_modal = move |_| props.is_open.set(false);
 
+    // Escape closes the drawer wherever focus is, as the backdrop click does.
+    let mut is_open = props.is_open;
+    use_effect(move || {
+        spawn(async move {
+            let mut keys = document::eval(
+                r#"
+                document.addEventListener("keydown", (event) => {
+                    if (event.key === "Escape") dioxus.send(true);
+                });
+                await new Promise(() => {});
+                "#,
+            );
+            while keys.recv::<bool>().await.is_ok() {
+                if *is_open.peek() {
+                    is_open.set(false);
+                }
+            }
+        });
+    });
+
     let (modal_opacity, panel_translate, pointer_events) = if (*props.is_open)() {
         ("opacity-100", "translate-x-0", "pointer-events-auto")
     } else {
@@ -131,6 +151,7 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
         // Backdrop
         div {
           class: "absolute inset-0 bg-black/70 cursor-pointer",
+          aria_hidden: "true",
           onclick: close_modal,
         }
 
@@ -142,8 +163,18 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
               h3 { class: "text-2xl font-bold text-white tracking-tight",
                 "Active Transfers"
               }
-              p { class: "text-xs text-muted font-mono mt-1",
-                ":: {processing_count} PROCESSING // {errored_count} ERRORED"
+              p { class: "flex items-center gap-3 text-xs text-muted lowercase mt-1.5",
+                span { class: "flex items-center gap-1.5",
+                  span { class: "w-1.5 h-1.5 rounded-full bg-beet-leaf" }
+                  "{processing_count} PROCESSING"
+                }
+                span { class: "flex items-center gap-1.5",
+                  span {
+                    class: "w-1.5 h-1.5 rounded-full",
+                    class: if errored_count > 0 { "bg-red-500" } else { "bg-white/30" },
+                  }
+                  "{errored_count} ERRORED"
+                }
               }
             }
             button {

@@ -161,7 +161,7 @@ pub fn MatchPicker(props: MatchPickerProps) -> Element {
                         rsx! {
                             div { class: "mt-2 space-y-2",
                                 if list.is_empty() {
-                                    p { class: "text-xs font-mono text-muted/80", "beets found no matches." }
+                                    p { class: "text-xs text-muted/80", "beets found no matches." }
                                 } else {
                                     ChoiceList {
                                         class: "max-h-80 overflow-y-auto",
@@ -209,7 +209,7 @@ pub fn MatchPicker(props: MatchPickerProps) -> Element {
             }
             // Always present, so a screen reader announces the text it gets.
             p {
-                class: if notice.read().is_some() { "mt-2 text-xs font-mono text-red-400 break-words" },
+                class: if notice.read().is_some() { "mt-2 text-xs text-red-400 break-words" },
                 role: "status",
                 aria_live: "polite",
                 if let Some(text) = notice() {

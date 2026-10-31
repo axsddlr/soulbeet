@@ -174,19 +174,19 @@ pub fn FolderManager() -> Element {
 
             // Local Messages
             if !error().is_empty() {
-                div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 font-mono text-sm",
+                div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 text-sm",
                     "{error}"
                 }
             }
             if !success_msg().is_empty() {
-                div { class: "mb-4 p-4 bg-green-900/20 border border-green-500/50 rounded text-green-400 font-mono text-sm",
+                div { class: "mb-4 p-4 bg-green-900/20 border border-green-500/50 rounded text-green-400 text-sm",
                     "{success_msg}"
                 }
             }
 
             div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-4",
                 div {
-                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
+                    label { class: "block text-xs font-semibold text-muted mb-1.5",
                         "Folder Name (e.g., 'Music/Common')"
                     }
                     TextInput {
@@ -196,7 +196,7 @@ pub fn FolderManager() -> Element {
                     }
                 }
                 div {
-                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
+                    label { class: "block text-xs font-semibold text-muted mb-1.5",
                         "Folder Path"
                     }
                     TextInput {
@@ -214,7 +214,7 @@ pub fn FolderManager() -> Element {
                 "Existing Folders"
             }
             if folders.read().is_empty() {
-                p { class: "text-muted/80 font-mono italic", "No folders added yet." }
+                p { class: "text-muted/80 italic", "No folders added yet." }
             } else {
                 ul { class: "space-y-2",
                     {
@@ -263,7 +263,7 @@ pub fn FolderManager() -> Element {
                                                 }
                                                 div { class: "flex gap-3",
                                                     button {
-                                                        class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted",
+                                                        class: "text-xs text-muted hover:text-beet-accent transition-colors underline decoration-dotted",
                                                         onclick: move |_| {
                                                             edit_folder_name.set(folder.name.clone());
                                                             edit_folder_path.set(folder.path.clone());
@@ -272,7 +272,7 @@ pub fn FolderManager() -> Element {
                                                         "Edit"
                                                     }
                                                     button {
-                                                        class: "text-xs font-mono text-muted hover:text-red-400 transition-colors underline decoration-dotted",
+                                                        class: "text-xs text-muted hover:text-red-400 transition-colors underline decoration-dotted",
                                                         onclick: move |_| handle_delete_folder(id_delete.clone()),
                                                         "Delete"
                                                     }
@@ -293,14 +293,14 @@ pub fn FolderManager() -> Element {
 
             match &*settings_resource.read() {
                 None => rsx! {
-                    div { class: "animate-pulse text-muted font-mono", "Loading..." }
+                    div { class: "animate-pulse text-muted", "Loading..." }
                 },
                 Some(Err(e)) => {
                     let msg = friendly_error(e);
                     rsx! {
-                        div { class: "text-red-400 text-sm font-mono mb-3", "{msg}" }
+                        div { class: "text-red-400 text-sm mb-3", "{msg}" }
                         button {
-                            class: "text-xs font-mono text-muted hover:text-white underline decoration-dotted cursor-pointer",
+                            class: "text-xs text-muted hover:text-white underline decoration-dotted cursor-pointer",
                             onclick: move |_| settings_resource.restart(),
                             "Retry"
                         }
@@ -311,7 +311,7 @@ pub fn FolderManager() -> Element {
                     // Discovery (user-level)
                     div {
                         h3 { class: "text-sm font-semibold text-white mb-3", "Discovery" }
-                        p { class: "text-xs text-muted/80 font-mono mb-4",
+                        p { class: "text-xs text-muted/80 mb-4",
                             "Automatically download new tracks for listening based on your scrobble history."
                         }
                         div { class: "space-y-3",
@@ -319,7 +319,7 @@ pub fn FolderManager() -> Element {
                             div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                                 div {
                                     p { class: "text-sm text-white font-medium", "Enable Discovery" }
-                                    p { class: "text-xs text-muted/80 font-mono mt-0.5",
+                                    p { class: "text-xs text-muted/80 mt-0.5",
                                         "Periodically generate a playlist of new tracks to try"
                                     }
                                 }
@@ -349,12 +349,12 @@ pub fn FolderManager() -> Element {
                             if discovery_enabled() {
                                 // Folder selector
                                 div { class: "p-3 bg-white/[0.04] rounded-md",
-                                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "Download Folder" }
+                                    label { class: "block text-xs font-semibold text-muted mb-1.5", "Download Folder" }
                                     if folders.read().is_empty() {
-                                        p { class: "text-muted/80 font-mono text-sm italic", "No folders configured. Add a folder above first." }
+                                        p { class: "text-muted/80 text-sm italic", "No folders configured. Add a folder above first." }
                                     } else {
                                         select {
-                                            class: "w-full p-2 rounded bg-beet-panel text-white font-mono text-sm",
+                                            class: "w-full p-2 rounded bg-beet-panel text-white text-sm",
                                             value: "{discovery_folder_id}",
                                             onchange: move |e| async move {
                                                 let val = e.value();
@@ -379,7 +379,7 @@ pub fn FolderManager() -> Element {
 
                                 // Playlists: toggle + name + track count + lifetime per profile
                                 div { class: "p-3 bg-white/[0.04] rounded-md",
-                                    label { class: "block text-xs font-mono text-muted mb-2 uppercase tracking-wider", "Playlists" }
+                                    label { class: "block text-xs font-semibold text-muted mb-2", "Playlists" }
                                     div { class: "space-y-2",
                                         for (label, value, color, name_signal, tc_signal, lt_signal) in [
                                             ("Safe", "Conservative", "border-blue-500/40 bg-blue-600/10", &pl_name_safe, &tc_safe, &lt_safe),
@@ -398,7 +398,7 @@ pub fn FolderManager() -> Element {
                                                             // Toggle button
                                                             button {
                                                                 class: format!(
-                                                                    "shrink-0 w-16 py-0.5 text-xs font-mono rounded cursor-pointer transition-colors text-center {}",
+                                                                    "shrink-0 w-16 py-0.5 text-xs rounded cursor-pointer transition-colors text-center {}",
                                                                     if active { "bg-white/15 text-white" } else { "bg-white/5 text-muted/80" }
                                                                 ),
                                                                 onclick: move |_| async move {
@@ -425,7 +425,7 @@ pub fn FolderManager() -> Element {
                                                             }
                                                             // Name input
                                                             input {
-                                                                class: "flex-1 p-1 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs",
+                                                                class: "flex-1 p-1 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white text-xs",
                                                                 value: "{name_signal}",
                                                                 disabled: !active,
                                                                 oninput: {
@@ -451,9 +451,9 @@ pub fn FolderManager() -> Element {
                                                         if active {
                                                             div { class: "flex gap-2 mt-1.5 ml-18",
                                                                 div { class: "flex items-center gap-1",
-                                                                    span { class: "text-[10px] font-mono text-muted/80", "Tracks" }
+                                                                    span { class: "text-[10px] text-muted/80", "Tracks" }
                                                                     input {
-                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
+                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white text-xs text-center",
                                                                         "type": "number",
                                                                         min: "1",
                                                                         max: "50",
@@ -477,9 +477,9 @@ pub fn FolderManager() -> Element {
                                                                     }
                                                                 }
                                                                 div { class: "flex items-center gap-1",
-                                                                    span { class: "text-[10px] font-mono text-muted/80", "Days" }
+                                                                    span { class: "text-[10px] text-muted/80", "Days" }
                                                                     input {
-                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
+                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white text-xs text-center",
                                                                         "type": "number",
                                                                         min: "1",
                                                                         max: "90",
@@ -519,9 +519,9 @@ pub fn FolderManager() -> Element {
                         p { class: "text-sm text-white font-medium mb-2", "Last.fm" }
                         div { class: "space-y-3",
                             div {
-                                label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "Username" }
+                                label { class: "block text-xs font-semibold text-muted mb-1.5", "Username" }
                                 input {
-                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white text-sm",
                                     value: "{lastfm_username}",
                                     oninput: move |e| lastfm_username.set(e.value()),
                                     onchange: move |_| async move {
@@ -535,9 +535,9 @@ pub fn FolderManager() -> Element {
                                 }
                             }
                             div {
-                                label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "API Key" }
+                                label { class: "block text-xs font-semibold text-muted mb-1.5", "API Key" }
                                 input {
-                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white text-sm",
                                     value: "{lastfm_api_key}",
                                     oninput: move |e| lastfm_api_key.set(e.value()),
                                     onchange: move |_| async move {
@@ -550,7 +550,7 @@ pub fn FolderManager() -> Element {
                                     placeholder: "Enter Last.fm API key",
                                     "type": "password",
                                 }
-                                p { class: "text-xs text-muted/80 font-mono mt-1",
+                                p { class: "text-xs text-muted/80 mt-1",
                                     "Get one at "
                                     a {
                                         href: "https://www.last.fm/api/account/create",
@@ -568,7 +568,7 @@ pub fn FolderManager() -> Element {
                         div {
                             p { class: "text-sm text-white font-medium mb-1", "ListenBrainz Username" }
                             input {
-                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white text-sm",
                                 value: "{lb_username}",
                                 oninput: move |e| lb_username.set(e.value()),
                                 onchange: move |_| async move {
@@ -584,11 +584,11 @@ pub fn FolderManager() -> Element {
                         }
                         div { class: "mt-3",
                             p { class: "text-sm text-white font-medium mb-1", "ListenBrainz Token" }
-                            p { class: "text-xs text-muted/80 font-mono mb-2",
+                            p { class: "text-xs text-muted/80 mb-2",
                                 "Configure scrobbling in your Navidrome personal settings."
                             }
                             input {
-                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white text-sm",
                                 value: "{lb_token}",
                                 oninput: move |e| lb_token.set(e.value()),
                                 onchange: move |_| async move {
@@ -602,7 +602,7 @@ pub fn FolderManager() -> Element {
                                 "type": "password",
                             }
                         }
-                        p { class: "text-xs text-muted/80 font-mono mt-3",
+                        p { class: "text-xs text-muted/80 mt-3",
                             "Set up scrobbling in your Navidrome personal settings to feed the recommendation engine."
                         }
                     }
@@ -611,7 +611,7 @@ pub fn FolderManager() -> Element {
                     div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                         div {
                             p { class: "text-sm text-white font-medium", "Auto-delete 1-star tracks" }
-                            p { class: "text-xs text-muted/80 font-mono mt-0.5",
+                            p { class: "text-xs text-muted/80 mt-0.5",
                                 "Automatically delete files rated 1 star in Navidrome during sync"
                             }
                         }
@@ -642,12 +642,12 @@ pub fn FolderManager() -> Element {
                     div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                         div {
                             p { class: "text-sm text-white font-medium", "Discovery promote threshold" }
-                            p { class: "text-xs text-muted/80 font-mono mt-0.5",
+                            p { class: "text-xs text-muted/80 mt-0.5",
                                 "Promote discovery tracks to your library when rated at or above this"
                             }
                         }
                         input {
-                            class: "w-16 p-2 rounded bg-beet-panel text-white font-mono text-sm text-center",
+                            class: "w-16 p-2 rounded bg-beet-panel text-white text-sm text-center",
                             value: "{discovery_promote_threshold}",
                             oninput: move |e| discovery_promote_threshold.set(e.value()),
                             onchange: move |_| async move {

@@ -29,9 +29,9 @@ pub fn SettingsPage() -> Element {
 
     rsx! {
 
-        div { class: "space-y-6 text-white w-full max-w-4xl mt-2 md:mt-6",
-            div { class: "mb-2",
-                h1 { class: "text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-2",
+        div { class: "text-white w-full max-w-5xl mx-auto mt-2 md:mt-6",
+            div { class: "mb-6 md:mb-8",
+                h1 { class: "text-3xl md:text-5xl font-extrabold tracking-tight text-white leading-tight",
                     "Settings"
                 }
             }

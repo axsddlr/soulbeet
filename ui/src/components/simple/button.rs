@@ -34,7 +34,7 @@ pub struct Props {
 pub fn Button(props: Props) -> Element {
     let variant_classes = props.variant.get_classes();
     let disabled_classes = if props.disabled {
-        "opacity-40 cursor-not-allowed pointer-events-none"
+        "opacity-60 cursor-not-allowed pointer-events-none"
     } else {
         ""
     };

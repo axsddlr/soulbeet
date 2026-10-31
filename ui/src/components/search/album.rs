@@ -38,6 +38,10 @@ fn year(date: &str) -> &str {
     }
 }
 
+/// Hidden until hover or focus, on devices that can hover. Touch devices
+/// always show the control.
+const HOVER_REVEAL: &str = "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:translate-y-2 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:translate-y-0 focus-within:opacity-100! focus-within:translate-y-0!";
+
 #[component]
 pub fn AlbumResult(props: Props) -> Element {
     let album = &props.album;
@@ -47,6 +51,12 @@ pub fn AlbumResult(props: Props) -> Element {
         .as_ref()
         .filter(|t| !t.is_empty())
         .map(|t| t.len());
+
+    let reveal = if props.download_state == DownloadRowState::Idle {
+        HOVER_REVEAL
+    } else {
+        ""
+    };
 
     let search_sources = rsx! {
         button {
@@ -86,24 +96,25 @@ pub fn AlbumResult(props: Props) -> Element {
 
     rsx! {
         div {
-            class: "h-full rounded-lg transition-colors duration-300",
-            class: if props.is_expanded { "bg-gradient-to-b from-beet-dim to-beet-panel overflow-visible" } else { "bg-beet-panel hover:bg-beet-dim" },
+            class: "h-full rounded-md transition-colors duration-300",
+            class: if props.is_expanded { "bg-beet-dark overflow-visible" } else { "bg-beet-panel hover:bg-beet-dim" },
 
             if props.is_expanded {
-                // Album header, Spotify style
+                // Album header, Spotify style: a fixed grey tone fading into the page
+                div { class: "rounded-t-md bg-gradient-to-b from-[#535353] via-[#2a2a2a] to-[#121212]",
                 div {
-                    class: "flex flex-col sm:flex-row sm:items-end gap-4 md:gap-6 p-4 md:p-6 cursor-pointer group",
+                    class: "flex flex-col sm:flex-row items-center sm:items-end gap-4 md:gap-6 p-4 md:p-6 cursor-pointer group",
                     onclick: move |_| props.on_toggle.call(()),
                     CoverArt {
                         album: album.clone(),
-                        class: "w-40 h-40 md:w-[232px] md:h-[232px] rounded shadow-2xl shadow-black/60",
+                        class: "w-full max-w-[232px] aspect-square sm:w-48 sm:h-48 md:w-[232px] md:h-[232px] rounded shadow-2xl shadow-black/60",
                     }
-                    div { class: "min-w-0 flex-1",
-                        p { class: "text-xs font-bold text-white mb-1 md:mb-2", "Album" }
-                        p { class: "text-3xl md:text-5xl lg:text-7xl font-extrabold tracking-tight text-white leading-none break-words line-clamp-2 pb-1",
+                    div { class: "min-w-0 w-full sm:flex-1",
+                        p { class: "text-sm font-bold text-white mb-2", "Album" }
+                        p { class: "text-3xl md:text-5xl lg:text-7xl font-extrabold tracking-tight text-white leading-tight break-words line-clamp-2",
                             "{album.title}"
                         }
-                        p { class: "mt-3 md:mt-5 text-sm text-muted truncate",
+                        p { class: "mt-2 text-sm text-muted truncate",
                             span { class: "font-bold text-white", "{album.artist}" }
                             if let Some(year) = year {
                                 " · {year}"
@@ -115,7 +126,7 @@ pub fn AlbumResult(props: Props) -> Element {
                     }
                 }
                 // Action row
-                div { class: "flex items-center gap-2 px-4 md:px-6 pb-4",
+                div { class: "flex items-center gap-2 px-4 md:px-6 pb-4 pt-2",
                     {download}
                     {search_sources}
                     button {
@@ -136,18 +147,21 @@ pub fn AlbumResult(props: Props) -> Element {
                         }
                     }
                 }
+                }
             } else {
                 // Album card
                 div {
-                    class: "p-3 group cursor-pointer",
+                    class: "p-3 md:p-4 group cursor-pointer",
                     onclick: move |_| props.on_toggle.call(()),
-                    div { class: "relative mb-3",
+                    div { class: "relative mb-3 md:mb-4",
                         CoverArt {
                             album: album.clone(),
                             class: "w-full aspect-square rounded-md shadow-lg shadow-black/50",
                         }
-                        // Round green action, shown on hover like Spotify's play button
-                        div { class: "absolute right-2 bottom-2 z-10 transition-opacity duration-200 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100",
+                        // Round green action like Spotify's play button. Hover-capable
+                        // devices reveal it on hover or focus; touch shows it always.
+                        // A download in flight keeps it shown.
+                        div { class: "absolute right-2 bottom-2 z-10 transition-all duration-200 {reveal}",
                             {download}
                         }
                     }

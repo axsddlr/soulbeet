@@ -47,7 +47,7 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
 
             // Header
             div { class: "px-3 py-2 border-b border-white/5",
-                p { class: "text-[10px] font-mono text-muted/80 uppercase tracking-widest", "Download to" }
+                p { class: "text-xs font-semibold text-muted", "Download to" }
             }
 
             // Folder list
@@ -100,7 +100,7 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
             if props.show_quality {
                 div { class: "border-t border-white/5" }
                 div { class: "px-3 py-2",
-                    p { class: "text-[10px] font-mono text-muted/60 italic", "Quality: auto" }
+                    p { class: "text-[10px] text-muted/60 italic", "Quality: auto" }
                 }
             }
         }

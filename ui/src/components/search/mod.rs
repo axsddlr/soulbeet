@@ -740,7 +740,7 @@ pub fn Search() -> Element {
                 let provider = data.provider;
                 let albums = matches!(data.results.first(), Some(SearchResult::Album(_)));
                 let list_class = if albums {
-                    "list-none p-0 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 md:gap-5"
+                    "list-none p-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
                 } else {
                     "list-none p-0 flex flex-col"
                 };

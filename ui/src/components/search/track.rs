@@ -101,7 +101,7 @@ pub fn TrackResult(props: Props) -> Element {
         div { class: "flex items-center justify-end gap-1 shrink-0",
           // Search sources button
           button {
-            class: "p-2 rounded-full text-muted hover:text-white hover:bg-white/10 transition-colors cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 group/src",
+            class: "p-2 rounded-full text-muted hover:text-white hover:bg-white/10 transition-all cursor-pointer [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 group/src",
             title: "Search sources",
             onclick: move |evt: MouseEvent| {
               evt.stop_propagation();

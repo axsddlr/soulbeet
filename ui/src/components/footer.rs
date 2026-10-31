@@ -47,7 +47,7 @@ pub fn Footer() -> Element {
                     href: "https://hub.docker.com/repository/docker/docccccc/soulbeet",
                     target: "_blank",
                     class: "text-beet-accent/80 hover:text-beet-leaf transition-colors",
-                    "[ v{local} • up to date ]"
+                    "v{local} • up to date"
                   }
                 }
             } else {
@@ -58,7 +58,7 @@ pub fn Footer() -> Element {
                     target: "_blank",
                     class: "text-amber-500/80 hover:text-amber-400 transition-colors cursor-pointer",
                     title: "Newer version {remote} available",
-                    "[ v{local} -> v{remote} ]"
+                    "v{local} -> v{remote}"
                   }
                 }
             }
@@ -66,38 +66,38 @@ pub fn Footer() -> Element {
         (Some(None), Some(ref local)) => {
             // Failed to parse remote version
             rsx! {
-              span { class: "text-muted/80", "[ v{local} ]" }
+              span { class: "text-muted/80", "v{local}" }
             }
         }
         (None, Some(ref local)) => {
             // Loading
             rsx! {
-              span { class: "text-muted/60", "[ v{local} • checking... ]" }
+              span { class: "text-muted/60", "v{local} • checking..." }
             }
         }
         _ => {
             // No local version found
             rsx! {
-              span { class: "text-red-400/70", "[ version check failed ]" }
+              span { class: "text-red-400/70", "version check failed" }
             }
         }
     };
 
     rsx! {
       footer { class: "mt-8 py-6 text-center border-t border-white/5",
-        div { class: "flex flex-wrap justify-center gap-x-6 gap-y-2 text-[11px] font-medium uppercase tracking-wider text-muted/70",
+        div { class: "flex flex-wrap justify-center gap-x-6 gap-y-2 text-xs font-medium text-muted/70",
           {version}
           a {
             class: "hover:text-white hover:underline transition-colors",
             href: "https://hub.docker.com/repository/docker/docccccc/soulbeet",
             target: "_blank",
-            "[ Docker Hub ]"
+            "Docker Hub"
           }
           a {
             class: "hover:text-white hover:underline transition-colors",
             href: "https://github.com/terry90/soulbeet",
             target: "_blank",
-            "[ Github ]"
+            "Github"
           }
         }
       }

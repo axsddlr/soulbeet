@@ -158,7 +158,7 @@ fn WebNavbar() -> Element {
 
     rsx! {
         Layout {
-            div { class: "flex flex-1 min-h-0 md:gap-2 md:p-2",
+            div { class: "flex min-h-0 md:gap-2 md:p-2",
                 Navbar {
                     Link {
                         class: SIDEBAR_LINK,
@@ -238,10 +238,14 @@ fn WebNavbar() -> Element {
                 }
             }
 
-            ActivityBar { downloads, on_open: move |_| downloads_open.set(true) }
+            // Activity bar slot. Desktop keeps the row at a fixed height, so the
+            // sidebar does not shrink when the bar appears.
+            div { class: "relative z-30 min-w-0 md:h-[72px]",
+                ActivityBar { downloads, on_open: move |_| downloads_open.set(true) }
+            }
 
             // Phone tab bar
-            nav { class: "md:hidden shrink-0 grid grid-cols-4 bg-black border-t border-white/5 pb-[env(safe-area-inset-bottom)]",
+            nav { class: "md:hidden relative z-30 grid grid-cols-4 bg-black border-t border-white/5 pb-[env(safe-area-inset-bottom)]",
                 Link {
                     class: TAB_LINK,
                     active_class: TAB_ACTIVE,

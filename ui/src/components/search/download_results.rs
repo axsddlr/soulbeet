@@ -57,7 +57,7 @@ fn quality_badge(item: &DownloadableItem) -> Element {
 
     rsx! {
         span {
-            class: "text-[10px] font-mono px-1.5 py-0.5 rounded border {color} uppercase shrink-0",
+            class: "text-[10px] font-mono px-2 py-0.5 rounded-full {color} uppercase shrink-0",
             "{label}"
         }
     }
@@ -136,12 +136,12 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
                         h4 { class: "text-base font-bold text-white", "{album.title}" }
                         if props.is_best {
                             span {
-                                class: "text-[10px] font-mono px-1.5 py-0.5 rounded border bg-beet-accent/20 text-beet-accent border-beet-accent/40 uppercase shrink-0",
+                                class: "text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full bg-beet-accent/20 text-beet-accent uppercase shrink-0",
                                 "Best match"
                             }
                         }
                     }
-                    p { class: "text-sm text-muted font-mono",
+                    p { class: "text-sm text-muted",
                         "{album.artist.clone().unwrap_or_default()} - Quality: {album.quality}, Score: {album.score:.2}"
                     }
                 }
@@ -289,7 +289,7 @@ pub fn DownloadResults(props: Props) -> Element {
             div { class: "mb-4",
                 label {
                     r#for: "dl_folder",
-                    class: "block text-sm font-medium mb-1 text-muted font-mono",
+                    class: "block text-sm font-medium mb-1 text-muted",
                     "Select Target Folder"
                 }
                 select {
@@ -308,12 +308,12 @@ pub fn DownloadResults(props: Props) -> Element {
                 if props.is_searching {
                     div { class: "flex flex-col items-center justify-center p-4 bg-white/5 rounded-lg",
                         div { class: "animate-spin rounded-full h-8 w-8 border-4 border-white/10 border-t-beet-accent mb-2" }
-                        p { class: "text-sm text-white/80 animate-pulse text-center font-mono",
+                        p { class: "text-sm text-white/80 animate-pulse text-center",
                             "Searching... The rarer your track is, the longer the search can take."
                         }
                     }
                 } else if results.is_empty() {
-                    div { class: "text-center text-muted/80 py-8 font-mono", "No results found" }
+                    div { class: "text-center text-muted/80 py-8", "No results found" }
                 }
                 for (idx, album) in results.iter().enumerate() {
                     AlbumResultItem {

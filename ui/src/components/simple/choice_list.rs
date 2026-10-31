@@ -66,14 +66,14 @@ pub fn ChoiceList(props: ChoiceListProps) -> Element {
                                 span { class: "flex items-baseline justify-between gap-2",
                                     span { class: "text-sm font-bold text-white break-words min-w-0", "{choice.title}" }
                                     if let Some(aside) = &choice.aside {
-                                        span { class: "text-xs font-mono text-beet-leaf shrink-0", "{aside}" }
+                                        span { class: "text-xs text-beet-leaf shrink-0", "{aside}" }
                                     }
                                 }
                                 if let Some(detail) = &choice.detail {
                                     span { class: "block text-xs text-muted break-words", "{detail}" }
                                 }
                                 if let Some(note) = &choice.note {
-                                    span { class: "block text-[10px] font-mono text-muted/80 break-words", "{note}" }
+                                    span { class: "block text-[10px] text-muted/80 break-words", "{note}" }
                                 }
                             }
                         }
