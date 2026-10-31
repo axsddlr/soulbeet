@@ -272,6 +272,8 @@ pub struct ScriptedFinder {
     answers: Mutex<Vec<Vec<DownloadableGroup>>>,
     queries: Mutex<Vec<String>>,
     hold: Mutex<Option<Hold>>,
+    /// How many of the next searches error instead of answering.
+    failures: AtomicUsize,
 }
 
 impl ScriptedFinder {
@@ -280,7 +282,14 @@ impl ScriptedFinder {
             answers: Mutex::new(answers),
             queries: Mutex::new(Vec::new()),
             hold: Mutex::new(None),
+            failures: AtomicUsize::new(0),
         })
+    }
+
+    /// Makes the next `count` searches fail, as a rate-limited or
+    /// unreachable slskd does, without taking an answer off the script.
+    pub fn fail_searches(&self, count: usize) {
+        self.failures.store(count, Ordering::SeqCst);
     }
 
     /// Makes each search wait, as a slow slskd search does: the first
@@ -308,7 +317,7 @@ impl AlternateFinder for ScriptedFinder {
         _backend: &Arc<dyn DownloadBackend>,
         artist: &str,
         title: &str,
-    ) -> Vec<DownloadableGroup> {
+    ) -> SoulResult<Vec<DownloadableGroup>> {
         self.queries
             .lock()
             .unwrap()
@@ -318,11 +327,18 @@ impl AlternateFinder for ScriptedFinder {
             hold.reached.notify_one();
             hold.release.notified().await;
         }
+        let failed = self
+            .failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if failed {
+            return Err(SoulseekError::SearchTimeout);
+        }
         let mut answers = self.answers.lock().unwrap();
-        if answers.is_empty() {
+        Ok(if answers.is_empty() {
             Vec::new()
         } else {
             answers.remove(0)
-        }
+        })
     }
 }

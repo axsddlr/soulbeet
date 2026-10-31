@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::enqueue::{stopped_rows, transfer_key};
-use super::failover::{Failover, SourcePool, MAX_SOURCES_PER_TRACK};
+use super::failover::{Failover, SourcePool, Trigger, MAX_SOURCES_PER_TRACK};
 use super::process::{album_jobs, import_job, resolve_on_disk, unresolved_row, ResolvedSlot};
 use super::utils::FileId;
 use crate::config::CONFIG;
@@ -399,7 +399,8 @@ impl DownloadMonitor {
     /// `Searching` the caller must not mark the slot failed: it was rebound,
     /// or a re-search running on its own task may still find it a peer.
     /// Every poll other slots go on being watched meanwhile, since nothing
-    /// here waits on a search.
+    /// here waits on a search. `trigger` says whether the transfer stalled
+    /// or really failed, which a re-search's cooldown tells apart.
     ///
     /// Never fires for cancellations: a user cancelling a download, or the
     /// monitor's own cleanup, must not spawn a fresh transfer.
@@ -408,6 +409,7 @@ impl DownloadMonitor {
         slot: usize,
         backend: &Arc<dyn DownloadBackend>,
         reason: &str,
+        trigger: Trigger,
     ) -> Retry {
         if self.cancellation_token.is_cancelled() {
             return Retry::Exhausted;
@@ -415,7 +417,10 @@ impl DownloadMonitor {
         let Some(pool) = self.pool.as_mut() else {
             return Retry::Exhausted;
         };
-        let queued = match pool.enqueue_or_search(slot, backend, &self.batch).await {
+        let queued = match pool
+            .enqueue_or_search(slot, backend, &self.batch, trigger)
+            .await
+        {
             Failover::Enqueued(queued) => queued,
             Failover::Searching => {
                 debug!(
@@ -951,7 +956,9 @@ impl DownloadMonitor {
                         first_seen.elapsed().as_secs() / 60,
                         download.item
                     );
-                    if self.try_failover(slot, backend, "Transfer timed out").await
+                    if self
+                        .try_failover(slot, backend, "Transfer timed out", Trigger::Failure)
+                        .await
                         != Retry::Exhausted
                     {
                         continue;
@@ -977,7 +984,10 @@ impl DownloadMonitor {
                     state.transferred = download.transferred;
                     state.progress_at = Instant::now();
                 } else if state.progress_at.elapsed() > STALL_TIMEOUT
-                    && self.try_failover(slot, backend, "Transfer stalled").await == Retry::Rebound
+                    && self
+                        .try_failover(slot, backend, "Transfer stalled", Trigger::Stall)
+                        .await
+                        == Retry::Rebound
                 {
                     continue;
                 }
@@ -1005,7 +1015,9 @@ impl DownloadMonitor {
                 if failing_since.elapsed() >= FAILED_STATE_CONFIRM {
                     let retryable = !matches!(download.state, DownloadState::Cancelled);
                     if !retryable
-                        || self.try_failover(slot, backend, "Transfer failed").await
+                        || self
+                            .try_failover(slot, backend, "Transfer failed", Trigger::Failure)
+                            .await
                             == Retry::Exhausted
                     {
                         self.settle(slot, SlotPhase::Settled, backend.id());
@@ -1087,7 +1099,11 @@ impl DownloadMonitor {
             if let Some(reason) = absent_reason {
                 // Logged only once the track is really being written off:
                 // a successful failover reports its own retry instead.
-                if self.try_failover(slot, backend, reason).await != Retry::Exhausted {
+                if self
+                    .try_failover(slot, backend, reason, Trigger::Failure)
+                    .await
+                    != Retry::Exhausted
+                {
                     continue;
                 }
                 warn!(
@@ -1128,7 +1144,11 @@ impl DownloadMonitor {
             if !self.watching(slot) {
                 continue;
             }
-            if self.try_failover(slot, backend, REASON).await != Retry::Exhausted {
+            if self
+                .try_failover(slot, backend, REASON, Trigger::Failure)
+                .await
+                != Retry::Exhausted
+            {
                 retried = true;
                 continue;
             }
@@ -2774,5 +2794,32 @@ mod tests {
             states_for(&mut rx, "dirA/aaa.flac").as_slice(),
             [DownloadState::Failed(_)]
         ));
+    }
+
+    #[tokio::test]
+    async fn a_failure_inside_the_cooldown_after_a_stall_search_searches_again() {
+        // At the stall the peers are offline; two minutes later the transfer
+        // fails and they are back, well inside the cooldown.
+        let finder = ScriptedFinder::new(vec![vec![], vec![], found_on_peer_z().remove(0)]);
+        let (mut m, _rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        let stalled = [listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)];
+
+        poll_promptly(&mut m, &stalled, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &stalled, &backend).await;
+        assert_eq!(finder.queries().len(), 2);
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        let failed = [failed_transfer("peer_a", "dirA/aaa.flac")];
+        poll_promptly(&mut m, &failed, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &failed, &backend).await;
+
+        assert_eq!(finder.queries().len(), 3);
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
     }
 }

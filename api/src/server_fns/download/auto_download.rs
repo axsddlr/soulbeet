@@ -37,6 +37,8 @@ use super::monitor::{DownloadMonitor, WatchedTransfer};
 #[cfg(feature = "server")]
 use shared::metadata::{Album, Track};
 #[cfg(feature = "server")]
+use soulbeet::error::Result as SoulResult;
+#[cfg(feature = "server")]
 use soulbeet::DownloadBackend;
 
 /// Score threshold for automatic source selection (per D-04).
@@ -78,11 +80,26 @@ pub(super) async fn search_backend(
     album: Option<&Album>,
     tracks: &[Track],
 ) -> Vec<DownloadableGroup> {
+    try_search_backend(id, backend, album, tracks)
+        .await
+        .unwrap_or_default()
+}
+
+/// `search_backend`, but a search that could not start, or whose polls
+/// errored before it returned anything, is an `Err` rather than nothing. A
+/// poll error after some results keeps those.
+#[cfg(feature = "server")]
+async fn try_search_backend(
+    id: &str,
+    backend: &Arc<dyn DownloadBackend>,
+    album: Option<&Album>,
+    tracks: &[Track],
+) -> SoulResult<Vec<DownloadableGroup>> {
     let search_id = match backend.start_search(album, tracks).await {
         Ok(sid) => sid,
         Err(e) => {
             warn!("Backend {} search start failed: {}", id, e);
-            return Vec::new();
+            return Err(e);
         }
     };
 
@@ -106,10 +123,10 @@ pub(super) async fn search_backend(
                     if !result.groups.is_empty() {
                         latest_groups = result.groups;
                     }
-                    return latest_groups;
+                    return Ok(latest_groups);
                 }
                 SearchState::NotFound => {
-                    return latest_groups;
+                    return Ok(latest_groups);
                 }
                 SearchState::InProgress => {
                     if !result.groups.is_empty() {
@@ -119,14 +136,19 @@ pub(super) async fn search_backend(
             },
             Err(e) => {
                 warn!("Backend {} poll error: {}", id, e);
-                return latest_groups;
+                return if latest_groups.is_empty() {
+                    Err(e)
+                } else {
+                    Ok(latest_groups)
+                };
             }
         }
     }
-    latest_groups
+    Ok(latest_groups)
 }
 
-/// Re-searches a failing track on the backend its batch downloads from.
+/// Re-searches a failing track on the backend its batch downloads from,
+/// passing on a search that could not start or answer as an error.
 #[cfg(feature = "server")]
 pub(super) struct BackendFinder;
 
@@ -138,7 +160,7 @@ impl AlternateFinder for BackendFinder {
         backend: &Arc<dyn DownloadBackend>,
         artist: &str,
         title: &str,
-    ) -> Vec<DownloadableGroup> {
+    ) -> SoulResult<Vec<DownloadableGroup>> {
         let track = Track {
             id: String::new(),
             title: title.to_string(),
@@ -150,7 +172,7 @@ impl AlternateFinder for BackendFinder {
             mbid: None,
             release_mbid: None,
         };
-        search_backend(backend.id(), backend, None, &[track]).await
+        try_search_backend(backend.id(), backend, None, &[track]).await
     }
 }
 
