@@ -127,6 +127,7 @@ For discovery (optional): add your Last.fm API key and/or ListenBrainz token in 
 | `SECRET_KEY` | Encryption key for tokens and credentials | |
 | `NAVIDROME_URL` | Your Navidrome server URL. Optional: without it you log in with local accounts, and discovery playlists, rating sync and auto-delete are unavailable | |
 | `BEETS_CONFIG` | Path to your beets config file. Replaces the shipped `/app/beets_config.yaml` (beets defaults still apply underneath) | `beets_config.yaml` |
+| `BEETS_LIBRARY_DIR` | Directory for the beets library databases. By default each music folder holds its own `.beets_library.db`, which fails with "database is locked" on SMB/NFS shares. Set it to a **local** path (for example `/data/beets`) to keep them there, one `<folder name>-<hash>.db` per music folder. An existing `.beets_library.db` is copied over the first time; the original is left in place | |
 | `BEETS_PYTHON` | Python interpreter that runs beets imports and the config check. By default it is read from the `#!` line of `beet` (`/usr/bin/python3` in the image) | |
 | `BEETS_ALBUM_MODE` | Enable album import mode (see below) | `false` |
 | `RUST_LOG` | Log filter. Use `info,soulbeet::beets::output=debug` to log every line beets prints. A bare `soulbeet::beets::output=debug` turns off all other info logs | |

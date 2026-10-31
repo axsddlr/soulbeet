@@ -12,6 +12,10 @@ services:
       - SECRET_KEY=a_secret_key # Change this to a secure random key
       - NAVIDROME_URL=http://localhost:4533 # Your Navidrome server URL
       # - BEETS_CONFIG=/config/config.yaml # Needs the ./beets:/config volume below
+      # Keep the beets library databases here instead of in each music folder. Use it
+      # when the music is on an SMB/NFS share ("database is locked"). /data must be
+      # local storage, not a network share. Existing databases are copied on first use.
+      # - BEETS_LIBRARY_DIR=/data/beets
     volumes:
       - soulbeet_data:/data
       # Map the download folder.
