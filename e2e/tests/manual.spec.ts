@@ -72,8 +72,9 @@ test('Require FLAC only keeps mp3 sources out of the options', async ({ context,
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
 
-  // The saved value survives a full reload.
-  await page.reload();
+  // The saved value survives a full reload of the app.
+  await page.goto('/');
+  await openSettings(page);
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Require FLAC only' })).toHaveAttribute(
     'aria-checked',
