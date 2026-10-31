@@ -13,6 +13,10 @@ use shared::download::{DownloadableGroup, DownloadableItem, EnqueueStatus, Queue
 use soulbeet::DownloadBackend;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{info, warn};
 
 use super::enqueue::{enqueue_claimed, transfer_key};
@@ -24,6 +28,14 @@ use crate::transfer_registry::{BatchRef, TransferRegistry};
 /// failure, so this caps a dead track at roughly 4 minutes plus the
 /// re-search.
 pub const MAX_SOURCES_PER_TRACK: usize = 6;
+
+/// Re-searches one slot may run. A stall can search while its peers are
+/// offline, so a later failure must still get a fresh look.
+pub const MAX_RESEARCHES_PER_SLOT: usize = 3;
+
+/// The least time between two re-searches of the same slot, so peers have
+/// a chance to come back before the next one.
+pub const RESEARCH_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
 /// How far a re-searched candidate's duration may stray from the original's,
 /// at least, before it is taken for a different recording.
@@ -95,13 +107,18 @@ fn strip_track_number(title: &str) -> &str {
     rest
 }
 
-/// `segment` up to a featured-artist marker ("ft.", "feat", "featuring").
+/// `segment` up to a featured-artist marker ("ft.", "feat", "featuring"),
+/// in any case.
 fn strip_featured(segment: &str) -> String {
     segment
         .split_whitespace()
         .enumerate()
         .take_while(|(i, word)| {
-            *i == 0 || !matches!(*word, "feat" | "feat." | "ft" | "ft." | "featuring")
+            *i == 0
+                || !matches!(
+                    word.to_lowercase().as_str(),
+                    "feat" | "feat." | "ft" | "ft." | "featuring"
+                )
         })
         .map(|(_, word)| word)
         .collect::<Vec<_>>()
@@ -149,6 +166,56 @@ pub fn title_key(title: &str) -> String {
     shared::recommendation::normalize_for_matching(&segments.join(" "))
 }
 
+/// The title a re-search sends: `title` without what `title_key` drops (a
+/// leading track number, featured artists, remaster, edit or version
+/// qualifiers) and with its whitespace collapsed, but in its own case and
+/// words otherwise. Live, remix, acoustic and instrumental qualifiers stay,
+/// as they name the recording wanted. Never empty: a title that cleans down
+/// to nothing goes out as it is, trimmed.
+pub fn query_title(title: &str) -> String {
+    let raw = title.trim();
+    let dashed = raw.replace(['\u{2013}', '\u{2014}'], "-");
+    let mut rest = strip_track_number(&dashed);
+
+    // Bracketed qualifiers first, so a dash inside one cannot split it.
+    let mut kept = String::new();
+    while let Some(open) = rest.find(['(', '[']) {
+        kept.push_str(&rest[..open]);
+        let close = if rest[open..].starts_with('(') {
+            ')'
+        } else {
+            ']'
+        };
+        let inner = &rest[open + 1..];
+        let Some(len) = inner.find(close) else {
+            rest = &rest[open..];
+            break;
+        };
+        if !is_dropped_qualifier(&inner[..len].to_lowercase()) {
+            kept.push(' ');
+            kept.push_str(&rest[open..open + len + 2]);
+            kept.push(' ');
+        }
+        rest = &inner[len + 1..];
+    }
+    kept.push_str(rest);
+
+    let segments: Vec<String> = kept
+        .split(" - ")
+        .enumerate()
+        .filter(|(i, segment)| *i == 0 || !is_dropped_qualifier(&segment.to_lowercase()))
+        .map(|(_, segment)| strip_featured(segment))
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let cleaned = segments.join(" - ");
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        raw.to_string()
+    } else {
+        cleaned
+    }
+}
+
 /// Whether a candidate's duration is close enough to the original's to be
 /// the same recording. Unknown on either side cannot be judged, so it passes.
 fn duration_matches(original: Option<u32>, candidate: Option<u32>) -> bool {
@@ -186,15 +253,16 @@ fn usable_candidates(
     found
 }
 
-/// Search for `track` again: by artist and title, then by the title alone
-/// only when that finds nothing usable.
+/// Search for `track` again: by artist and cleaned title (`query_title`),
+/// then by the title alone only when that finds nothing usable.
 async fn research(
     finder: &dyn AlternateFinder,
     backend: &Arc<dyn DownloadBackend>,
     track: &DownloadableItem,
     tried: &[(String, String)],
 ) -> Vec<DownloadableItem> {
-    let title = track.title.trim();
+    let title = query_title(&track.title);
+    let title = title.as_str();
     let artist = track.artist.trim();
     let mut queries = Vec::new();
     if !artist.is_empty() {
@@ -217,6 +285,39 @@ async fn research(
     Vec::new()
 }
 
+/// What one slot needs to search again, detached from the pool so the
+/// search can run on a task of its own.
+struct ResearchJob {
+    finder: Arc<dyn AlternateFinder>,
+    track: DownloadableItem,
+    tried: Vec<(String, String)>,
+}
+
+/// A re-search running on its own task. Dropping it, with the pool or the
+/// monitor, stops the search: nobody is left to use what it finds.
+struct PendingResearch {
+    found: oneshot::Receiver<Vec<DownloadableItem>>,
+    task: JoinHandle<()>,
+}
+
+impl Drop for PendingResearch {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// What `SourcePool::enqueue_or_search` did for a slot.
+pub enum Failover {
+    /// An alternate was accepted into the batch folder.
+    Enqueued(QueuedDownload),
+    /// A re-search is running for the slot, so a later call may have a
+    /// source. The slot keeps its transfer meanwhile.
+    Searching,
+    /// The slot is out of sources for now: its budget is spent, or no
+    /// re-search may run yet.
+    Exhausted,
+}
+
 /// Alternates and attempt budget for one track.
 struct Slot {
     /// The track this slot downloads, which a re-search looks for. `None`
@@ -226,8 +327,13 @@ struct Slot {
     /// `(source, id)` of every source this slot was given, the original
     /// included, so a re-search never offers one of them again.
     tried: Vec<(String, String)>,
-    /// Whether this slot already re-searched. Each query runs once per slot.
-    researched: bool,
+    /// How many re-searches this slot started, at most
+    /// `MAX_RESEARCHES_PER_SLOT`.
+    researches: usize,
+    /// When the last re-search started; the next waits `RESEARCH_COOLDOWN`.
+    researched_at: Option<Instant>,
+    /// The re-search running for this slot, at most one.
+    pending: Option<PendingResearch>,
     used: usize,
 }
 
@@ -241,8 +347,23 @@ impl Slot {
             track,
             alternates,
             tried,
-            researched: false,
+            researches: 0,
+            researched_at: None,
+            pending: None,
             used: 1,
+        }
+    }
+
+    /// Queue a re-search's finds behind the alternates, minus any source
+    /// this slot was given or holds since the search started.
+    fn absorb(&mut self, found: Vec<DownloadableItem>) {
+        for item in found {
+            let same = |source: &str, id: &str| source == item.source && id == item.id;
+            if !self.tried.iter().any(|(source, id)| same(source, id))
+                && !self.alternates.iter().any(|a| same(&a.source, &a.id))
+            {
+                self.alternates.push_back(item);
+            }
         }
     }
 }
@@ -334,8 +455,96 @@ impl SourcePool {
         Some(item)
     }
 
-    /// `take_next`, re-searching once on `backend` when the slot's
-    /// alternates are spent but its budget is not.
+    /// Start this slot's next re-search, if it may have one now: a finder
+    /// is set, the track is known, the source budget is not spent, no
+    /// re-search is running, fewer than `MAX_RESEARCHES_PER_SLOT` ran, and
+    /// `RESEARCH_COOLDOWN` passed since the last one began.
+    fn research_job(&mut self, slot: usize) -> Option<ResearchJob> {
+        let finder = self.finder.clone()?;
+        let entry = self.slots.get_mut(slot)?;
+        let cooled = entry
+            .researched_at
+            .is_none_or(|at| at.elapsed() >= RESEARCH_COOLDOWN);
+        if entry.pending.is_some()
+            || entry.used >= MAX_SOURCES_PER_TRACK
+            || entry.researches >= MAX_RESEARCHES_PER_SLOT
+            || !cooled
+        {
+            return None;
+        }
+        let track = entry.track.clone()?;
+        entry.researches += 1;
+        entry.researched_at = Some(Instant::now());
+        Some(ResearchJob {
+            finder,
+            track,
+            tried: entry.tried.clone(),
+        })
+    }
+
+    /// Take in this slot's running re-search if it has finished. Returns
+    /// whether one is still running.
+    fn collect_research(&mut self, slot: usize) -> bool {
+        let Some(entry) = self.slots.get_mut(slot) else {
+            return false;
+        };
+        let Some(pending) = entry.pending.as_mut() else {
+            return false;
+        };
+        let found = match pending.found.try_recv() {
+            Ok(found) => found,
+            Err(oneshot::error::TryRecvError::Empty) => return true,
+            // The task ended without an answer: it found nothing.
+            Err(oneshot::error::TryRecvError::Closed) => Vec::new(),
+        };
+        entry.pending = None;
+        entry.absorb(found);
+        false
+    }
+
+    /// Start a re-search for this slot on a task of its own. Returns false
+    /// when the slot may not re-search now.
+    fn spawn_research(&mut self, slot: usize, backend: &Arc<dyn DownloadBackend>) -> bool {
+        let Some(job) = self.research_job(slot) else {
+            return false;
+        };
+        let (tx, found) = oneshot::channel();
+        let backend = Arc::clone(backend);
+        let task = tokio::spawn(async move {
+            let items = research(job.finder.as_ref(), &backend, &job.track, &job.tried).await;
+            let _ = tx.send(items);
+        });
+        self.slots[slot].pending = Some(PendingResearch { found, task });
+        true
+    }
+
+    /// Test hook: pretend this slot's last re-search started `by` ago.
+    #[cfg(test)]
+    pub(crate) fn backdate_research(&mut self, slot: usize, by: Duration) {
+        self.slots[slot].researched_at = Some(
+            Instant::now()
+                .checked_sub(by)
+                .expect("monotonic clock younger than the window under test"),
+        );
+    }
+
+    /// Test hook: wait for this slot's running re-search, if any, and take
+    /// in what it found.
+    #[cfg(test)]
+    pub(crate) async fn research_settled(&mut self, slot: usize) {
+        let entry = &mut self.slots[slot];
+        let Some(mut pending) = entry.pending.take() else {
+            return;
+        };
+        let found = tokio::time::timeout(Duration::from_secs(5), &mut pending.found)
+            .await
+            .expect("the re-search never finished")
+            .unwrap_or_default();
+        entry.absorb(found);
+    }
+
+    /// `take_next`, re-searching on `backend` and waiting for it when the
+    /// slot's alternates are spent but its budget is not.
     async fn next_source(
         &mut self,
         slot: usize,
@@ -344,15 +553,9 @@ impl SourcePool {
         if let Some(item) = self.take_next(slot) {
             return Some(item);
         }
-        let finder = self.finder.clone()?;
-        let entry = self.slots.get_mut(slot)?;
-        if entry.researched || entry.used >= MAX_SOURCES_PER_TRACK {
-            return None;
-        }
-        entry.researched = true;
-        let track = entry.track.clone()?;
-        let found = research(finder.as_ref(), backend, &track, &entry.tried).await;
-        entry.alternates.extend(found);
+        let job = self.research_job(slot)?;
+        let found = research(job.finder.as_ref(), backend, &job.track, &job.tried).await;
+        self.slots[slot].absorb(found);
         self.take_next(slot)
     }
 
@@ -360,10 +563,11 @@ impl SourcePool {
     /// the ones it cannot have (another batch owns the transfer, the peer is
     /// offline, slskd is already fetching it) until one is accepted or the
     /// slot runs dry. The accepted alternate's key stays claimed by `batch`.
-    /// Once the static alternates are spent the slot re-searches, once. A
-    /// refused alternate still costs the slot a source, so five dead peers in
-    /// a row spend the whole budget without a transfer ever being attempted.
-    /// `None` means the slot is out of sources or budget.
+    /// Once the static alternates are spent the slot re-searches, waiting
+    /// for it, within its re-search budget and cooldown. A refused alternate
+    /// still costs the slot a source, so five dead peers in a row spend the
+    /// whole budget without a transfer ever being attempted. `None` means
+    /// the slot is out of sources or budget.
     pub async fn enqueue_next(
         &mut self,
         slot: usize,
@@ -371,35 +575,76 @@ impl SourcePool {
         batch: &BatchRef,
     ) -> Option<QueuedDownload> {
         while let Some(item) = self.next_source(slot, backend).await {
-            let source = item.source.clone();
-            let key = transfer_key(backend.id(), &item.source, &item.id);
-            if TransferRegistry::global()
-                .claim(&[key], batch)
-                .claimed
-                .is_empty()
-            {
-                warn!(
-                    "Failover source {} skipped: another batch is downloading {}",
-                    source, item.id
-                );
-                continue;
-            }
-            match enqueue_claimed(backend, vec![item], batch).await {
-                Ok(queued) => {
-                    if let Some(ok) = queued
-                        .into_iter()
-                        .find(|d| d.status == EnqueueStatus::Enqueued)
-                    {
-                        info!("Failover enqueued {} from {}", ok.item, ok.source);
-                        return Some(ok);
-                    }
-                    warn!("Failover source {} refused the enqueue", source);
-                }
-                Err(e) => warn!("Failover enqueue to {} failed: {}", source, e),
+            if let Some(queued) = enqueue_alternate(item, backend, batch).await {
+                return Some(queued);
             }
         }
         None
     }
+
+    /// `enqueue_next` for a poll loop, which must not wait on a search: when
+    /// the slot's alternates are spent, the re-search is started on a task
+    /// of its own and `Searching` returned. A later call takes in what it
+    /// found and enqueues from that. While a re-search is running the slot
+    /// starts no other.
+    pub async fn enqueue_or_search(
+        &mut self,
+        slot: usize,
+        backend: &Arc<dyn DownloadBackend>,
+        batch: &BatchRef,
+    ) -> Failover {
+        if self.collect_research(slot) {
+            return Failover::Searching;
+        }
+        loop {
+            let Some(item) = self.take_next(slot) else {
+                return if self.spawn_research(slot, backend) {
+                    Failover::Searching
+                } else {
+                    Failover::Exhausted
+                };
+            };
+            if let Some(queued) = enqueue_alternate(item, backend, batch).await {
+                return Failover::Enqueued(queued);
+            }
+        }
+    }
+}
+
+/// Claim and enqueue one alternate into `batch`'s folder. `None` when
+/// another batch owns the transfer or the backend did not accept it.
+async fn enqueue_alternate(
+    item: DownloadableItem,
+    backend: &Arc<dyn DownloadBackend>,
+    batch: &BatchRef,
+) -> Option<QueuedDownload> {
+    let source = item.source.clone();
+    let key = transfer_key(backend.id(), &item.source, &item.id);
+    if TransferRegistry::global()
+        .claim(&[key], batch)
+        .claimed
+        .is_empty()
+    {
+        warn!(
+            "Failover source {} skipped: another batch is downloading {}",
+            source, item.id
+        );
+        return None;
+    }
+    match enqueue_claimed(backend, vec![item], batch).await {
+        Ok(queued) => {
+            if let Some(ok) = queued
+                .into_iter()
+                .find(|d| d.status == EnqueueStatus::Enqueued)
+            {
+                info!("Failover enqueued {} from {}", ok.item, ok.source);
+                return Some(ok);
+            }
+            warn!("Failover source {} refused the enqueue", source);
+        }
+        Err(e) => warn!("Failover enqueue to {} failed: {}", source, e),
+    }
+    None
 }
 
 /// Line the accepted downloads up with the tracks they came from, in the
@@ -441,6 +686,7 @@ mod tests {
     use shared::download::DownloadableItem;
     use soulbeet::DownloadBackend;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn queued(source: &str, item: &str) -> QueuedDownload {
         QueuedDownload {
@@ -1029,7 +1275,7 @@ mod tests {
         assert_eq!(
             finder.queries(),
             vec!["Kowloon Wake Up".to_string()],
-            "each query runs at most once per slot"
+            "no second re-search inside the cooldown"
         );
     }
 
@@ -1129,5 +1375,139 @@ mod tests {
         // Two static alternates and three re-searched ones after the original.
         assert_eq!(stub.destinations().len(), 5);
         assert_eq!(pool.attempts_used(0), MAX_SOURCES_PER_TRACK);
+    }
+
+    #[test]
+    fn query_title_drops_numbering_features_and_remasters_only() {
+        for (raw, query) in [
+            ("03 - Song (feat. X) [2011 Remaster]", "Song"),
+            ("07. Wake Up", "Wake Up"),
+            ("3 Song", "Song"),
+            ("Song ft. X", "Song"),
+            ("Song Feat. X & Y", "Song"),
+            ("Song featuring X", "Song"),
+            ("Song - 2011 Remaster", "Song"),
+            ("Song \u{2013} Remastered 2009", "Song"),
+            ("Song (Remastered 2009)", "Song"),
+            ("Song (Radio Edit)", "Song"),
+            ("Song [Album Version]", "Song"),
+            ("  Wake   Up  ", "Wake Up"),
+            ("Don't Stop Me Now!", "Don't Stop Me Now!"),
+            ("Song (Live)", "Song (Live)"),
+            ("Song [Live at Wembley]", "Song [Live at Wembley]"),
+            ("Song - Live", "Song - Live"),
+            ("Song (Kowloon Remix)", "Song (Kowloon Remix)"),
+            ("Song (Acoustic Version)", "Song (Acoustic Version)"),
+            ("Song (Instrumental) (feat. X)", "Song (Instrumental)"),
+            ("1999", "1999"),
+            // Cleaning would leave nothing, so the raw title goes out.
+            ("(feat. X)", "(feat. X)"),
+            (" [2011 Remaster] ", "[2011 Remaster]"),
+        ] {
+            assert_eq!(query_title(raw), query, "query for {raw:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn research_sends_the_cleaned_title() {
+        let finder = ScriptedFinder::new(vec![]);
+        let original = item("peer_a", "07 - Wake Up (feat. X) [2011 Remaster]", "a.flac");
+        let mut pool = SourcePool::single(vec![original]).with_finder(finder.clone());
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
+
+        assert!(pool.enqueue_next(0, &backend, &batch("X")).await.is_none());
+        assert_eq!(
+            finder.queries(),
+            vec!["Kowloon Wake Up".to_string(), "Wake Up".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_research_budget_is_three_five_minutes_apart() {
+        assert_eq!(MAX_RESEARCHES_PER_SLOT, 3);
+        assert_eq!(RESEARCH_COOLDOWN, Duration::from_secs(5 * 60));
+    }
+
+    #[tokio::test]
+    async fn a_fruitless_research_may_run_again_after_the_cooldown() {
+        // The first re-search, both queries, finds nothing: its peers are
+        // offline. They come back for the third query.
+        let finder = ScriptedFinder::new(vec![
+            vec![],
+            vec![],
+            vec![group(
+                "peer_z",
+                vec![item("peer_z", "Wake Up", "z.flac")],
+                0.9,
+            )],
+        ]);
+        let mut pool = researching_pool(&[], &finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+
+        assert!(pool.enqueue_next(0, &backend, &batch("X")).await.is_none());
+        assert_eq!(finder.queries().len(), 2);
+
+        // Not yet: the cooldown has not run out.
+        pool.backdate_research(0, RESEARCH_COOLDOWN - Duration::from_secs(5));
+        assert!(pool.enqueue_next(0, &backend, &batch("X")).await.is_none());
+        assert_eq!(
+            finder.queries().len(),
+            2,
+            "searched again inside the cooldown"
+        );
+
+        pool.backdate_research(0, RESEARCH_COOLDOWN + Duration::from_secs(1));
+        let queued = pool.enqueue_next(0, &backend, &batch("X")).await;
+        assert_eq!(queued.map(|q| q.source), Some("peer_z".to_string()));
+        assert_eq!(finder.queries().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_slot_researches_at_most_three_times() {
+        let finder = ScriptedFinder::new(vec![]);
+        let mut pool = researching_pool(&[], &finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
+
+        for round in 1..=MAX_RESEARCHES_PER_SLOT + 2 {
+            assert!(pool.enqueue_next(0, &backend, &batch("X")).await.is_none());
+            pool.backdate_research(0, RESEARCH_COOLDOWN + Duration::from_secs(1));
+            let researches = round.min(MAX_RESEARCHES_PER_SLOT);
+            assert_eq!(
+                finder.queries().len(),
+                2 * researches,
+                "after {round} failovers"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_later_research_skips_what_an_earlier_one_offered() {
+        let finder = ScriptedFinder::new(vec![
+            vec![group(
+                "peer_y",
+                vec![item("peer_y", "Wake Up", "y.flac")],
+                0.9,
+            )],
+            vec![group(
+                "mixed",
+                vec![
+                    item("peer_y", "Wake Up", "y.flac"),
+                    item("peer_z", "Wake Up", "z.flac"),
+                ],
+                0.9,
+            )],
+        ]);
+        let mut pool = researching_pool(&[], &finder);
+        // peer_y refuses; peer_z, from the second re-search, accepts.
+        let stub = StubBackend::new(vec![ScriptedOutcome::Rejected, ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+
+        assert!(pool.enqueue_next(0, &backend, &batch("X")).await.is_none());
+        pool.backdate_research(0, RESEARCH_COOLDOWN + Duration::from_secs(1));
+        let queued = pool.enqueue_next(0, &backend, &batch("X")).await;
+
+        assert_eq!(queued.map(|q| q.source), Some("peer_z".to_string()));
+        assert_eq!(stub.destinations().len(), 2, "peer_y was not asked twice");
+        assert_eq!(pool.attempts_used(0), 3);
     }
 }

@@ -271,6 +271,7 @@ impl DownloadBackend for StubBackend {
 pub struct ScriptedFinder {
     answers: Mutex<Vec<Vec<DownloadableGroup>>>,
     queries: Mutex<Vec<String>>,
+    hold: Mutex<Option<Hold>>,
 }
 
 impl ScriptedFinder {
@@ -278,7 +279,20 @@ impl ScriptedFinder {
         Arc::new(Self {
             answers: Mutex::new(answers),
             queries: Mutex::new(Vec::new()),
+            hold: Mutex::new(None),
         })
+    }
+
+    /// Makes each search wait, as a slow slskd search does: the first
+    /// notifier fires when a query arrives (it is recorded by then), and the
+    /// query answers once the second one is notified.
+    pub fn hold_searches(&self) -> (Arc<Notify>, Arc<Notify>) {
+        let hold = Hold {
+            reached: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        };
+        *self.hold.lock().unwrap() = Some(hold.clone());
+        (hold.reached, hold.release)
     }
 
     /// Every query the finder was asked, in order.
@@ -299,6 +313,11 @@ impl AlternateFinder for ScriptedFinder {
             .lock()
             .unwrap()
             .push(format!("{artist} {title}").trim().to_string());
+        let hold = self.hold.lock().unwrap().clone();
+        if let Some(hold) = hold {
+            hold.reached.notify_one();
+            hold.release.notified().await;
+        }
         let mut answers = self.answers.lock().unwrap();
         if answers.is_empty() {
             Vec::new()

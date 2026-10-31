@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::enqueue::{stopped_rows, transfer_key};
-use super::failover::{SourcePool, MAX_SOURCES_PER_TRACK};
+use super::failover::{Failover, SourcePool, MAX_SOURCES_PER_TRACK};
 use super::process::{album_jobs, import_job, resolve_on_disk, unresolved_row, ResolvedSlot};
 use super::utils::FileId;
 use crate::config::CONFIG;
@@ -87,6 +87,19 @@ const STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// Row text for a slot that ran past `PER_TRACK_TIMEOUT` with no peer left.
 const TIMED_OUT: &str = "Download timed out after 1 hour";
+
+/// What `try_failover` did for a slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Retry {
+    /// The slot was rebound to another peer's transfer.
+    Rebound,
+    /// A re-search for the slot is running off the poll loop. The slot
+    /// keeps its transfer, failed or stalled, until a later poll can act on
+    /// what it finds.
+    Searching,
+    /// No other source can be had now.
+    Exhausted,
+}
 
 /// Where a slot is in its life. Only a `Watching` slot is looked at, shown
 /// or rebound: the others belong to the import queue or are finished.
@@ -382,8 +395,11 @@ impl DownloadMonitor {
         self
     }
 
-    /// Re-enqueue this slot from its next-best peer. Returns true when the
-    /// slot was rebound, in which case the caller must not mark it failed.
+    /// Re-enqueue this slot from its next-best peer. On `Rebound` or
+    /// `Searching` the caller must not mark the slot failed: it was rebound,
+    /// or a re-search running on its own task may still find it a peer.
+    /// Every poll other slots go on being watched meanwhile, since nothing
+    /// here waits on a search.
     ///
     /// Never fires for cancellations: a user cancelling a download, or the
     /// monitor's own cleanup, must not spawn a fresh transfer.
@@ -392,15 +408,23 @@ impl DownloadMonitor {
         slot: usize,
         backend: &Arc<dyn DownloadBackend>,
         reason: &str,
-    ) -> bool {
+    ) -> Retry {
         if self.cancellation_token.is_cancelled() {
-            return false;
+            return Retry::Exhausted;
         }
         let Some(pool) = self.pool.as_mut() else {
-            return false;
+            return Retry::Exhausted;
         };
-        let Some(queued) = pool.enqueue_next(slot, backend, &self.batch).await else {
-            return false;
+        let queued = match pool.enqueue_or_search(slot, backend, &self.batch).await {
+            Failover::Enqueued(queued) => queued,
+            Failover::Searching => {
+                debug!(
+                    "{} for {}, waiting on a re-search",
+                    reason, self.tracked_files[slot].filename
+                );
+                return Retry::Searching;
+            }
+            Failover::Exhausted => return Retry::Exhausted,
         };
 
         let attempt = pool.attempts_used(slot);
@@ -443,7 +467,7 @@ impl DownloadMonitor {
             previous_item,
             entry,
         });
-        true
+        Retry::Rebound
     }
 
     /// Stop the transfer a slot is about to stop watching, and remember it
@@ -927,7 +951,9 @@ impl DownloadMonitor {
                         first_seen.elapsed().as_secs() / 60,
                         download.item
                     );
-                    if self.try_failover(slot, backend, "Transfer timed out").await {
+                    if self.try_failover(slot, backend, "Transfer timed out").await
+                        != Retry::Exhausted
+                    {
                         continue;
                     }
                     self.abandon(slot, backend).await;
@@ -951,7 +977,7 @@ impl DownloadMonitor {
                     state.transferred = download.transferred;
                     state.progress_at = Instant::now();
                 } else if state.progress_at.elapsed() > STALL_TIMEOUT
-                    && self.try_failover(slot, backend, "Transfer stalled").await
+                    && self.try_failover(slot, backend, "Transfer stalled").await == Retry::Rebound
                 {
                     continue;
                 }
@@ -978,7 +1004,10 @@ impl DownloadMonitor {
                     .get_or_insert_with(Instant::now);
                 if failing_since.elapsed() >= FAILED_STATE_CONFIRM {
                     let retryable = !matches!(download.state, DownloadState::Cancelled);
-                    if !retryable || !self.try_failover(slot, backend, "Transfer failed").await {
+                    if !retryable
+                        || self.try_failover(slot, backend, "Transfer failed").await
+                            == Retry::Exhausted
+                    {
                         self.settle(slot, SlotPhase::Settled, backend.id());
                         let row = self.stamp(download.clone());
                         let _ = self.tx.send(DownloadEvent::Progress(vec![row]));
@@ -1058,7 +1087,7 @@ impl DownloadMonitor {
             if let Some(reason) = absent_reason {
                 // Logged only once the track is really being written off:
                 // a successful failover reports its own retry instead.
-                if self.try_failover(slot, backend, reason).await {
+                if self.try_failover(slot, backend, reason).await != Retry::Exhausted {
                     continue;
                 }
                 warn!(
@@ -1081,7 +1110,8 @@ impl DownloadMonitor {
     /// Give every watched slot another peer after a batch's transfers never
     /// showed up in slskd at all, and write off only the ones with nowhere
     /// left to go. Returns true when nothing was retried, i.e. the batch is
-    /// finished.
+    /// finished. A slot still re-searching counts as retried: it is judged
+    /// again once the next grace window runs out.
     ///
     /// This is the only failover route a single-track batch has on this path:
     /// while nothing of the batch was ever seen, `process_poll_result`
@@ -1098,7 +1128,7 @@ impl DownloadMonitor {
             if !self.watching(slot) {
                 continue;
             }
-            if self.try_failover(slot, backend, REASON).await {
+            if self.try_failover(slot, backend, REASON).await != Retry::Exhausted {
                 retried = true;
                 continue;
             }
@@ -1405,6 +1435,7 @@ pub fn filenames_match(a: &str, b: &str) -> bool {
 #[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
+    use crate::server_fns::download::failover::RESEARCH_COOLDOWN;
     use crate::server_fns::download::test_support::{
         batch, group, item, key, transfer, Cancel, ScriptedFinder, ScriptedOutcome, StubBackend,
     };
@@ -2482,13 +2513,12 @@ mod tests {
         let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
         let backend: Arc<dyn DownloadBackend> = stub.clone();
         m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        let stalled = [listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)];
 
-        poll_tracks(
-            &mut m,
-            &[listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)],
-            &backend,
-        )
-        .await;
+        // The re-search runs off the poll loop; the next poll enqueues it.
+        poll_tracks(&mut m, &stalled, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_tracks(&mut m, &stalled, &backend).await;
 
         assert_eq!(m.tracked_files[0].source, "peer_z");
         assert_eq!(m.tracked_files[0].transfer_id, "t-dirZ/zzz.flac");
@@ -2501,13 +2531,13 @@ mod tests {
         let stub = StubBackend::new(vec![]);
         let backend: Arc<dyn DownloadBackend> = stub.clone();
         m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        let queued = [listed("peer_a", "dirA/aaa.flac", DownloadState::Queued)];
 
-        poll_tracks(
-            &mut m,
-            &[listed("peer_a", "dirA/aaa.flac", DownloadState::Queued)],
-            &backend,
-        )
-        .await;
+        // The re-search runs off the poll loop, and the poll after it finds
+        // nothing to move to.
+        poll_tracks(&mut m, &queued, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_tracks(&mut m, &queued, &backend).await;
 
         assert_eq!(m.tracked_files[0].source, "peer_a");
         assert_eq!(phase(&m, 0), SlotPhase::Watching);
@@ -2517,7 +2547,7 @@ mod tests {
         );
         assert_eq!(
             states_for(&mut rx, "dirA/aaa.flac"),
-            vec![DownloadState::Queued]
+            vec![DownloadState::Queued, DownloadState::Queued]
         );
         assert_eq!(finder.queries(), vec!["Kowloon Wake Up", "Wake Up"]);
     }
@@ -2589,15 +2619,160 @@ mod tests {
         let (mut m, _rx) = researching_monitor(&finder);
         let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
         m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        let failed = [failed_transfer("peer_a", "dirA/aaa.flac")];
 
-        poll_tracks(
-            &mut m,
-            &[failed_transfer("peer_a", "dirA/aaa.flac")],
-            &backend,
-        )
-        .await;
+        // The re-search runs off the poll loop; the next poll enqueues it.
+        poll_tracks(&mut m, &failed, &backend).await;
+        assert_eq!(
+            phase(&m, 0),
+            SlotPhase::Watching,
+            "not failed while searching"
+        );
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_tracks(&mut m, &failed, &backend).await;
 
         assert_eq!(m.tracked_files[0].source, "peer_z");
         assert_eq!(phase(&m, 0), SlotPhase::Watching);
+    }
+
+    /// One poll of `m`, failing the test if it does not finish promptly: a
+    /// re-search must never hold the poll loop.
+    async fn poll_promptly(
+        m: &mut DownloadMonitor,
+        listing: &[DownloadProgress],
+        backend: &Arc<dyn DownloadBackend>,
+    ) {
+        tokio::time::timeout(Duration::from_secs(5), poll_tracks(m, listing, backend))
+            .await
+            .expect("a re-search held up the poll");
+    }
+
+    #[tokio::test]
+    async fn a_slow_research_does_not_hold_up_the_other_slots() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (_reached, release) = finder.hold_searches();
+        let (tx, mut rx) = broadcast::channel(16);
+        let pool = SourcePool::from_tracks(
+            &[
+                Some(item("peer_a", "Wake Up", "dirA/aaa.flac")),
+                Some(item("peer_b", "Come Over", "dirB/bbb.flac")),
+            ],
+            &[],
+        )
+        .with_finder(finder.clone());
+        let mut m = monitor_on(
+            tx,
+            vec!["peer_a", "peer_b"],
+            vec!["dirA/aaa.flac", "dirB/bbb.flac"],
+        )
+        .with_failover(pool);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        let moving = |bytes| DownloadProgress {
+            transferred: bytes,
+            ..listed("peer_b", "dirB/bbb.flac", DownloadState::InProgress)
+        };
+
+        let listing = [failed_transfer("peer_a", "dirA/aaa.flac"), moving(4096)];
+        poll_promptly(&mut m, &listing, &backend).await;
+        let listing = [failed_transfer("peer_a", "dirA/aaa.flac"), moving(8192)];
+        poll_promptly(&mut m, &listing, &backend).await;
+
+        assert_eq!(
+            states_for(&mut rx, "dirB/bbb.flac"),
+            vec![DownloadState::InProgress, DownloadState::InProgress],
+            "the other slot's progress went out on every poll"
+        );
+        assert_eq!(m.track_states[1].transferred, 8192);
+        // The searching slot keeps its failed transfer meanwhile.
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+
+        release.notify_one();
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &listing, &backend).await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+    }
+
+    #[tokio::test]
+    async fn a_slot_has_one_research_in_flight_at_most() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (reached, release) = finder.hold_searches();
+        let (mut m, _rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        let listing = [failed_transfer("peer_a", "dirA/aaa.flac")];
+
+        poll_promptly(&mut m, &listing, &backend).await;
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .expect("the re-search never started");
+        for _ in 0..3 {
+            poll_promptly(&mut m, &listing, &backend).await;
+        }
+
+        assert_eq!(finder.queries(), vec!["Kowloon Wake Up".to_string()]);
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+
+        release.notify_one();
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &listing, &backend).await;
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(finder.queries(), vec!["Kowloon Wake Up".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_failure_after_a_fruitless_stall_research_searches_again() {
+        // At the stall the peers are offline; by the time the transfer fails
+        // they are back.
+        let finder = ScriptedFinder::new(vec![vec![], vec![], found_on_peer_z().remove(0)]);
+        let (mut m, _rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        let stalled = [listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)];
+
+        poll_promptly(&mut m, &stalled, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &stalled, &backend).await;
+        assert_eq!(finder.queries().len(), 2);
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+
+        m.pool
+            .as_mut()
+            .unwrap()
+            .backdate_research(0, RESEARCH_COOLDOWN + Duration::from_secs(1));
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        let failed = [failed_transfer("peer_a", "dirA/aaa.flac")];
+        poll_promptly(&mut m, &failed, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &failed, &backend).await;
+
+        assert_eq!(finder.queries().len(), 3);
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+    }
+
+    #[tokio::test]
+    async fn a_failure_inside_the_cooldown_settles() {
+        let finder = ScriptedFinder::new(vec![]);
+        let (mut m, mut rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        let failed = [failed_transfer("peer_a", "dirA/aaa.flac")];
+
+        poll_promptly(&mut m, &failed, &backend).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &failed, &backend).await;
+
+        assert_eq!(phase(&m, 0), SlotPhase::Settled);
+        assert_eq!(finder.queries().len(), 2);
+        assert!(matches!(
+            states_for(&mut rx, "dirA/aaa.flac").as_slice(),
+            [DownloadState::Failed(_)]
+        ));
     }
 }
