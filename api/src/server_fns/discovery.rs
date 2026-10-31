@@ -620,10 +620,9 @@ pub async fn generate_discovery_playlist_internal(
                     break;
                 }
 
-                let key = format!(
-                    "{}:{}",
-                    candidate.artist.to_lowercase(),
-                    candidate.track.to_lowercase()
+                let key = crate::models::discovery_history::fold_key(
+                    &candidate.artist,
+                    &candidate.track,
                 );
                 if seen.contains(&key) {
                     stats.candidates_skipped_seen += 1;
