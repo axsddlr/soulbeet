@@ -233,7 +233,10 @@ mod tests {
         let mp3 = album_files("MP3", ".mp3");
         let responses = [peer("lossless", &refs(&flac)), peer("lossy", &refs(&mp3))];
 
-        assert_eq!(sources(&search(&responses, false)), vec!["lossless", "lossy"]);
+        assert_eq!(
+            sources(&search(&responses, false)),
+            vec!["lossless", "lossy"]
+        );
     }
 
     #[test]
