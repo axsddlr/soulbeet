@@ -88,6 +88,20 @@ const STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Row text for a slot that ran past `PER_TRACK_TIMEOUT` with no peer left.
 const TIMED_OUT: &str = "Download timed out after 1 hour";
 
+/// Row text for a slot whose transfer never showed up in slskd's list.
+const NEVER_APPEARED: &str = "Download never appeared in slskd";
+
+/// What `recheck_absent_researches` did with the slots waiting on one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Recheck {
+    /// Every one of them is still searching, or none was waiting.
+    Unchanged,
+    /// At least one was rebound to a newly found peer.
+    Rebound,
+    /// At least one was written off, and none was rebound.
+    Settled,
+}
+
 /// What `try_failover` did for a slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Retry {
@@ -134,6 +148,11 @@ struct TrackState {
     progress_at: Instant,
     /// The byte count the transfer last reported.
     transferred: u64,
+    /// This binding's never-appeared window already ran out, and only the
+    /// re-search it started stands between the slot and its write-off. It is
+    /// looked at again every poll, so a search that comes back empty settles
+    /// the slot on the next one instead of after another window.
+    awaiting_research: bool,
     phase: SlotPhase,
 }
 
@@ -149,6 +168,7 @@ impl TrackState {
             failing_since: None,
             progress_at: Instant::now(),
             transferred: 0,
+            awaiting_research: false,
             phase: SlotPhase::Watching,
         }
     }
@@ -726,6 +746,22 @@ impl DownloadMonitor {
             .iter()
             .all(|state| state.first_seen.is_none());
         if matched.is_empty() && never_seen {
+            // Slots whose window already ran out wait on their re-search,
+            // not on the batch's window.
+            match self.recheck_absent_researches(backend).await {
+                Recheck::Rebound => {
+                    // The new transfer cannot be in this list either.
+                    *consecutive_empty = 0;
+                    return false;
+                }
+                Recheck::Settled
+                    if !(0..self.tracked_files.len()).any(|slot| self.watching(slot))
+                        && self.batch.inbox.close_if_idle() =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
             *consecutive_empty += 1;
             if *consecutive_empty >= MAX_CONSECUTIVE_EMPTY {
                 warn!(
@@ -742,7 +778,9 @@ impl DownloadMonitor {
                 // At least one slot moved to another peer, or a joining
                 // request is adding slots. Neither can show up in a list
                 // fetched before it was enqueued, so the grace window starts
-                // again from here.
+                // again from here. A slot that is re-searching instead does
+                // not wait for it: `recheck_absent_researches` judges it
+                // every poll.
                 *consecutive_empty = 0;
                 return false;
             }
@@ -1083,8 +1121,10 @@ impl DownloadMonitor {
             }
 
             let absent_reason = match self.track_states[slot].first_seen {
-                None if self.track_states[slot].bound_at.elapsed() > ABSENT_TRACK_TIMEOUT => {
-                    Some("Download never appeared in slskd")
+                None if self.track_states[slot].awaiting_research
+                    || self.track_states[slot].bound_at.elapsed() > ABSENT_TRACK_TIMEOUT =>
+                {
+                    Some(NEVER_APPEARED)
                 }
                 Some(_) => {
                     let missing_since = self.track_states[slot]
@@ -1126,8 +1166,9 @@ impl DownloadMonitor {
     /// Give every watched slot another peer after a batch's transfers never
     /// showed up in slskd at all, and write off only the ones with nowhere
     /// left to go. Returns true when nothing was retried, i.e. the batch is
-    /// finished. A slot still re-searching counts as retried: it is judged
-    /// again once the next grace window runs out.
+    /// finished. A slot still re-searching counts as retried, and from then
+    /// on `recheck_absent_researches` judges it every poll: once its search
+    /// comes back empty it is written off on the next one.
     ///
     /// This is the only failover route a single-track batch has on this path:
     /// while nothing of the batch was ever seen, `process_poll_result`
@@ -1136,7 +1177,6 @@ impl DownloadMonitor {
     /// two wait. A batch with more than one track only reaches them because
     /// a sibling showed up.
     async fn retry_or_fail_absent_batch(&mut self, backend: &Arc<dyn DownloadBackend>) -> bool {
-        const REASON: &str = "Download never appeared in slskd";
         let mut retried = false;
         let mut failed: Vec<DownloadProgress> = Vec::new();
 
@@ -1144,18 +1184,28 @@ impl DownloadMonitor {
             if !self.watching(slot) {
                 continue;
             }
-            if self
-                .try_failover(slot, backend, REASON, Trigger::Failure)
+            match self
+                .try_failover(slot, backend, NEVER_APPEARED, Trigger::Failure)
                 .await
-                != Retry::Exhausted
             {
-                retried = true;
-                continue;
+                Retry::Rebound => {
+                    retried = true;
+                    continue;
+                }
+                Retry::Searching => {
+                    self.track_states[slot].awaiting_research = true;
+                    retried = true;
+                    continue;
+                }
+                Retry::Exhausted => {}
             }
             // Without this, rows whose transfer never surfaced in slskd would
             // sit at "Queued" in the UI forever.
             self.settle(slot, SlotPhase::Settled, backend.id());
-            failed.push(make_failed_progress(&self.tracked_files[slot], REASON));
+            failed.push(make_failed_progress(
+                &self.tracked_files[slot],
+                NEVER_APPEARED,
+            ));
         }
 
         if !failed.is_empty() {
@@ -1163,6 +1213,49 @@ impl DownloadMonitor {
             let _ = self.tx.send(DownloadEvent::Progress(entries));
         }
         !retried
+    }
+
+    /// Look again at the slots whose never-appeared window ran out while a
+    /// re-search was running for them: rebind the ones it found a peer for,
+    /// write off the ones it came back empty for, and leave the rest
+    /// searching. Runs every poll of a batch nothing of which was listed,
+    /// so the outcome of a search is acted on the poll after it arrives.
+    async fn recheck_absent_researches(&mut self, backend: &Arc<dyn DownloadBackend>) -> Recheck {
+        let mut outcome = Recheck::Unchanged;
+        let mut failed: Vec<DownloadProgress> = Vec::new();
+
+        for slot in 0..self.tracked_files.len() {
+            if !self.watching(slot) || !self.track_states[slot].awaiting_research {
+                continue;
+            }
+            match self
+                .try_failover(slot, backend, NEVER_APPEARED, Trigger::Failure)
+                .await
+            {
+                Retry::Searching => {}
+                Retry::Rebound => outcome = Recheck::Rebound,
+                Retry::Exhausted => {
+                    warn!(
+                        "{} and its re-search found no other peer, marking failed: {}",
+                        NEVER_APPEARED, self.tracked_files[slot].filename
+                    );
+                    self.settle(slot, SlotPhase::Settled, backend.id());
+                    failed.push(make_failed_progress(
+                        &self.tracked_files[slot],
+                        NEVER_APPEARED,
+                    ));
+                    if outcome == Recheck::Unchanged {
+                        outcome = Recheck::Settled;
+                    }
+                }
+            }
+        }
+
+        if !failed.is_empty() {
+            let entries = self.stamp_batch(failed);
+            let _ = self.tx.send(DownloadEvent::Progress(entries));
+        }
+        outcome
     }
 
     /// Mark every watched track as failed and notify the UI. Used when
@@ -1459,7 +1552,7 @@ mod tests {
     use crate::server_fns::download::test_support::{
         batch, group, item, key, transfer, Cancel, ScriptedFinder, ScriptedOutcome, StubBackend,
     };
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, Notify};
 
     /// An instant `d` in the past, so a test can reach the monitor's
     /// elapsed-time windows without sleeping through them.
@@ -2821,5 +2914,244 @@ mod tests {
         assert_eq!(finder.queries().len(), 3);
         assert_eq!(m.tracked_files[0].source, "peer_z");
         assert_eq!(phase(&m, 0), SlotPhase::Watching);
+    }
+
+    /// A monitor watching "Wake Up" from peer_a, with peer_b as its one
+    /// static alternate and `finder` re-searching once both are spent. Its
+    /// re-searches have permits of their own, so a held search here never
+    /// starves another test's.
+    fn two_source_monitor(
+        finder: &Arc<ScriptedFinder>,
+    ) -> (DownloadMonitor, broadcast::Receiver<DownloadEvent>) {
+        let (tx, rx) = broadcast::channel(16);
+        let m = monitor_on(tx, vec!["peer_a"], vec!["dirA/aaa.flac"]).with_failover(
+            SourcePool::single(vec![
+                item("peer_a", "Wake Up", "dirA/aaa.flac"),
+                item("peer_b", "Wake Up", "dirB/bbb.flac"),
+            ])
+            .with_finder(finder.clone())
+            .with_research_limit(2),
+        );
+        (m, rx)
+    }
+
+    /// Lets both queries of a held re-search answer, one after the other.
+    async fn release_both_queries(reached: &Notify, release: &Notify) {
+        for _ in 0..2 {
+            tokio::time::timeout(Duration::from_secs(5), reached.notified())
+                .await
+                .expect("the re-search never asked");
+            release.notify_one();
+        }
+    }
+
+    /// Runs out the empty-poll window of a batch nothing of which was ever
+    /// listed, on the poll after `consecutive_empty` was set just short of it.
+    async fn run_out_absent_window(
+        m: &mut DownloadMonitor,
+        consecutive_empty: &mut usize,
+        backend: &Arc<dyn DownloadBackend>,
+    ) -> bool {
+        *consecutive_empty = MAX_CONSECUTIVE_EMPTY - 1;
+        m.process_poll_result(vec![], consecutive_empty, 99, backend)
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_never_appeared_batch_is_written_off_once_its_research_comes_back_empty() {
+        // Both peers' transfers never show up. The re-search after the
+        // second must not buy the slot a whole new window when it finds
+        // nothing: the write-off comes on the very next poll.
+        let finder = ScriptedFinder::new(vec![]);
+        let (reached, release) = finder.hold_searches();
+        let (mut m, mut rx) = two_source_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> =
+            StubBackend::new(vec![ScriptedOutcome::Enqueued, ScriptedOutcome::Enqueued]);
+        let mut consecutive_empty = 0;
+
+        assert!(!run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await);
+        assert_eq!(m.tracked_files[0].source, "peer_b");
+        assert!(!run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await);
+        assert_eq!(phase(&m, 0), SlotPhase::Watching, "searching, not failed");
+
+        release_both_queries(&reached, &release).await;
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        let stop = m
+            .process_poll_result(vec![], &mut consecutive_empty, 100, &backend)
+            .await;
+
+        assert!(stop, "nothing is left to watch");
+        assert_eq!(phase(&m, 0), SlotPhase::Settled);
+        assert_eq!(
+            states_for(&mut rx, "dirB/bbb.flac"),
+            vec![DownloadState::Failed(NEVER_APPEARED.into())]
+        );
+        assert_eq!(finder.queries(), vec!["Kowloon Wake Up", "Wake Up"]);
+    }
+
+    #[tokio::test]
+    async fn a_never_appeared_batch_waits_while_its_research_runs() {
+        let finder = ScriptedFinder::new(vec![]);
+        let (reached, release) = finder.hold_searches();
+        let (mut m, mut rx) = two_source_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> =
+            StubBackend::new(vec![ScriptedOutcome::Enqueued, ScriptedOutcome::Enqueued]);
+        let mut consecutive_empty = 0;
+        run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await;
+        run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await;
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .expect("the re-search never asked");
+
+        // Longer than a whole window, with the search still out.
+        for poll in 0..MAX_CONSECUTIVE_EMPTY + 2 {
+            let stop = m
+                .process_poll_result(vec![], &mut consecutive_empty, 100 + poll as u32, &backend)
+                .await;
+            assert!(!stop);
+        }
+
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(m.tracked_files[0].source, "peer_b");
+        assert!(states_for(&mut rx, "dirB/bbb.flac").is_empty());
+        assert_eq!(
+            finder.queries(),
+            vec!["Kowloon Wake Up"],
+            "one search, still held"
+        );
+
+        // Once it answers empty, the next poll writes the slot off.
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .expect("the title-only query never asked");
+        release.notify_one();
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        m.process_poll_result(vec![], &mut consecutive_empty, 200, &backend)
+            .await;
+        assert_eq!(phase(&m, 0), SlotPhase::Settled);
+    }
+
+    #[tokio::test]
+    async fn a_research_that_finds_a_peer_rebinds_a_never_appeared_slot() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (mut m, _rx) = two_source_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> =
+            StubBackend::new(vec![ScriptedOutcome::Enqueued, ScriptedOutcome::Enqueued]);
+        let mut consecutive_empty = 0;
+        run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await;
+        run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await;
+
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        let stop = m
+            .process_poll_result(vec![], &mut consecutive_empty, 100, &backend)
+            .await;
+
+        assert!(!stop);
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(consecutive_empty, 0, "the new transfer gets a fresh window");
+    }
+
+    #[tokio::test]
+    async fn a_researching_slot_is_written_off_even_when_a_sibling_was_rebound() {
+        // At the window slot 0 moves to peer_b and slot 1 re-searches. The
+        // window restarts for slot 0's new transfer, but slot 1's empty
+        // search has to settle it right away rather than after that window.
+        let finder = ScriptedFinder::new(vec![]);
+        let (tx, mut rx) = broadcast::channel(16);
+        let pool = SourcePool::from_tracks(
+            &[
+                Some(item("peer_a", "Wake Up", "dirA/aaa.flac")),
+                Some(item("peer_c", "Come Over", "dirC/ccc.flac")),
+            ],
+            &[group(
+                "peer_b",
+                vec![item("peer_b", "Wake Up", "dirB/Wake Up.flac")],
+                0.9,
+            )],
+        )
+        .with_finder(finder.clone())
+        .with_research_limit(2);
+        let mut m = monitor_on(
+            tx,
+            vec!["peer_a", "peer_c"],
+            vec!["dirA/aaa.flac", "dirC/ccc.flac"],
+        )
+        .with_failover(pool);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let mut consecutive_empty = 0;
+
+        assert!(!run_out_absent_window(&mut m, &mut consecutive_empty, &backend).await);
+        assert_eq!(m.tracked_files[0].source, "peer_b");
+        assert_eq!(phase(&m, 1), SlotPhase::Watching);
+
+        m.pool.as_mut().unwrap().research_settled(1).await;
+        let stop = m
+            .process_poll_result(vec![], &mut consecutive_empty, 100, &backend)
+            .await;
+
+        assert!(!stop, "slot 0 is still waiting on peer_b");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(phase(&m, 1), SlotPhase::Settled);
+        assert_eq!(
+            states_for(&mut rx, "dirC/ccc.flac"),
+            vec![DownloadState::Failed(NEVER_APPEARED.into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_absent_slot_is_written_off_once_its_research_comes_back_empty() {
+        // A sibling is listed, so the absent slot is judged on its own.
+        let finder = ScriptedFinder::new(vec![]);
+        let (tx, mut rx) = broadcast::channel(16);
+        let pool = SourcePool::from_tracks(
+            &[
+                Some(item("peer_a", "Wake Up", "dirA/aaa.flac")),
+                Some(item("peer_c", "Come Over", "dirC/ccc.flac")),
+            ],
+            &[],
+        )
+        .with_finder(finder.clone())
+        .with_research_limit(2);
+        let mut m = monitor_on(
+            tx,
+            vec!["peer_a", "peer_c"],
+            vec!["dirA/aaa.flac", "dirC/ccc.flac"],
+        )
+        .with_failover(pool);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
+        m.track_states[0].bound_at = ago(ABSENT_TRACK_TIMEOUT + Duration::from_secs(1));
+        let listing = [listed("peer_c", "dirC/ccc.flac", DownloadState::InProgress)];
+
+        poll_promptly(&mut m, &listing, &backend).await;
+        assert_eq!(phase(&m, 0), SlotPhase::Watching, "searching, not failed");
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &listing, &backend).await;
+
+        assert_eq!(phase(&m, 0), SlotPhase::Settled);
+        assert_eq!(
+            states_for(&mut rx, "dirA/aaa.flac"),
+            vec![DownloadState::Failed(NEVER_APPEARED.into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_slot_is_written_off_once_its_research_comes_back_empty() {
+        let finder = ScriptedFinder::new(vec![]);
+        let (mut m, mut rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
+        m.track_states[0].first_seen = Some(ago(PER_TRACK_TIMEOUT + Duration::from_secs(1)));
+        let running = [listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)];
+
+        poll_promptly(&mut m, &running, &backend).await;
+        assert_eq!(phase(&m, 0), SlotPhase::Watching, "searching, not failed");
+        m.pool.as_mut().unwrap().research_settled(0).await;
+        poll_promptly(&mut m, &running, &backend).await;
+
+        assert_eq!(phase(&m, 0), SlotPhase::TimedOut);
+        assert!(
+            states_for(&mut rx, "dirA/aaa.flac").contains(&DownloadState::Failed(TIMED_OUT.into()))
+        );
     }
 }
