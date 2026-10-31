@@ -85,8 +85,9 @@ pub enum ScriptedOutcome {
 
 /// Answers each enqueue from a scripted list, then rejects everything after
 /// the script runs out. Records every destination, cancellation and search
-/// (a search finds nothing), and lists whatever transfers the test sets. Each stub has its own backend id,
-/// so the registry keys of concurrent tests never collide.
+/// (a search finds nothing), and lists whatever transfers the test sets.
+/// Each stub has its own backend id, so the registry keys of concurrent
+/// tests never collide.
 pub struct StubBackend {
     id: &'static str,
     script: Mutex<Vec<ScriptedOutcome>>,

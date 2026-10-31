@@ -570,7 +570,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_research_without_the_setting_takes_any_format() {
         assert_eq!(
-            research_flags(BackendFinder { require_flac: false }).await,
+            research_flags(BackendFinder {
+                require_flac: false
+            })
+            .await,
             vec![false]
         );
     }

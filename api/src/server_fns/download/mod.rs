@@ -248,9 +248,16 @@ pub async fn download(req: DownloadRequest) -> Result<Vec<QueuedDownload>, Serve
         manual_batch_label(&req.items),
         target_path_buf,
     );
-    let queued = queue_detached(backend, req.items, fresh, username, req.backend, require_flac)
-        .await
-        .map_err(server_error)?;
+    let queued = queue_detached(
+        backend,
+        req.items,
+        fresh,
+        username,
+        req.backend,
+        require_flac,
+    )
+    .await
+    .map_err(server_error)?;
     match queued {
         Queued { error: Some(e), .. } => Err(server_error(e)),
         Queued {
