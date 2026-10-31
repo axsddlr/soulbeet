@@ -7,7 +7,10 @@ use crate::{friendly_error, FIELD_CLASS};
 pub fn PreferencesManager() -> Element {
     let mut settings = use_settings();
     let mut selected_provider = use_signal(|| settings.default_provider());
-    let mut require_flac_only = use_signal(|| settings.require_flac_only());
+    // The value being saved, shown until the save answers. Otherwise the
+    // switch reads the settings context, so it follows the saved value even
+    // when the settings arrive after this component mounts.
+    let mut pending_flac_only = use_signal(|| None::<bool>);
     let mut error = use_signal(String::new);
     let mut success_msg = use_signal(String::new);
     let mut saving = use_signal(|| false);
@@ -16,7 +19,6 @@ pub fn PreferencesManager() -> Element {
     use_effect(move || {
         if settings.is_loaded() && !synced() {
             selected_provider.set(settings.default_provider());
-            require_flac_only.set(settings.require_flac_only());
             synced.set(true);
         }
     });
@@ -29,20 +31,25 @@ pub fn PreferencesManager() -> Element {
         .map(|p| !p.available)
         .unwrap_or(false);
 
+    let require_flac_only = pending_flac_only().unwrap_or_else(|| settings.require_flac_only());
+
     // Saved on its own, as soon as it is flipped.
     let toggle_require_flac = move |_| async move {
+        if pending_flac_only().is_some() {
+            return;
+        }
         error.set(String::new());
         success_msg.set(String::new());
-        let new_val = !require_flac_only();
-        require_flac_only.set(new_val);
+        let new_val = !settings.require_flac_only();
+        pending_flac_only.set(Some(new_val));
         let update = api::UpdateUserSettings {
             require_flac_only: Some(new_val),
             ..Default::default()
         };
         if let Err(e) = settings.update(update).await {
-            require_flac_only.set(!new_val);
             error.set(friendly_error(&e));
         }
+        pending_flac_only.set(None);
     };
 
     let handle_save = move |_| async move {
@@ -137,7 +144,7 @@ pub fn PreferencesManager() -> Element {
                     button {
                         class: format!(
                             "relative w-11 h-6 rounded-full cursor-pointer transition-colors {}",
-                            if require_flac_only() { "bg-beet-leaf" } else { "bg-white/20" }
+                            if require_flac_only { "bg-beet-leaf" } else { "bg-white/20" }
                         ),
                         role: "switch",
                         aria_checked: "{require_flac_only}",
@@ -146,7 +153,7 @@ pub fn PreferencesManager() -> Element {
                         span {
                             class: format!(
                                 "absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform {}",
-                                if require_flac_only() { "translate-x-5" } else { "" }
+                                if require_flac_only { "translate-x-5" } else { "" }
                             ),
                         }
                     }
