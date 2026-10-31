@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
+use super::failover::AlternateFinder;
 use crate::transfer_registry::{BatchRef, TransferKey, TransferOwner};
 
 pub fn item(source: &str, title: &str, id: &str) -> DownloadableItem {
@@ -261,5 +262,48 @@ impl DownloadBackend for StubBackend {
     }
     async fn health_check(&self) -> bool {
         true
+    }
+}
+
+/// Answers each re-search from a scripted list, then finds nothing once the
+/// script runs out. Records every query as `"<artist> <title>"`, trimmed, so
+/// a title-only query reads as the bare title.
+pub struct ScriptedFinder {
+    answers: Mutex<Vec<Vec<DownloadableGroup>>>,
+    queries: Mutex<Vec<String>>,
+}
+
+impl ScriptedFinder {
+    pub fn new(answers: Vec<Vec<DownloadableGroup>>) -> Arc<Self> {
+        Arc::new(Self {
+            answers: Mutex::new(answers),
+            queries: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Every query the finder was asked, in order.
+    pub fn queries(&self) -> Vec<String> {
+        self.queries.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl AlternateFinder for ScriptedFinder {
+    async fn search(
+        &self,
+        _backend: &Arc<dyn DownloadBackend>,
+        artist: &str,
+        title: &str,
+    ) -> Vec<DownloadableGroup> {
+        self.queries
+            .lock()
+            .unwrap()
+            .push(format!("{artist} {title}").trim().to_string());
+        let mut answers = self.answers.lock().unwrap();
+        if answers.is_empty() {
+            Vec::new()
+        } else {
+            answers.remove(0)
+        }
     }
 }

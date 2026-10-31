@@ -281,6 +281,20 @@ async fn queue_detached(
     tokio::spawn(queue_and_watch(backend, items, fresh, username, backend_id)).await
 }
 
+/// Failover for a manual request's monitor. The picker sends no other
+/// search results, so every slot starts without alternates and finds them
+/// through `finder` when its transfer fails.
+#[cfg(feature = "server")]
+fn manual_pool(
+    enqueued: &[QueuedDownload],
+    items: &[DownloadableItem],
+    finder: Arc<dyn failover::AlternateFinder>,
+) -> failover::SourcePool {
+    // Slots follow `enqueued`, not `items`.
+    failover::SourcePool::from_tracks(&failover::align_pool_tracks(enqueued, items), &[])
+        .with_finder(finder)
+}
+
 /// Claims and enqueues a manual request's files, shows their rows, and hands
 /// the enqueued ones to a monitor: the running batch's when the request
 /// joined one, else a new one.
@@ -292,6 +306,7 @@ async fn queue_and_watch(
     username: String,
     backend_id: Option<String>,
 ) -> Queued {
+    let requested = items.clone();
     let enq = enqueue_request(&backend, items, fresh).await;
     let refusal = enq.refusal();
     let RequestEnqueue {
@@ -368,6 +383,11 @@ async fn queue_and_watch(
                 enqueued.iter().map(|d| &d.item).collect::<Vec<_>>()
             );
             let transfers = enqueued.iter().map(WatchedTransfer::from).collect();
+            let pool = manual_pool(
+                &enqueued,
+                &requested,
+                Arc::new(auto_download::BackendFinder),
+            );
             let task_username = username.clone();
             let task_cancellation = register_user_task(&username).await;
             tokio::spawn(async move {
@@ -378,7 +398,8 @@ async fn queue_and_watch(
                     task_cancellation,
                     task_username.clone(),
                     batch,
-                );
+                )
+                .with_failover(pool);
                 monitor.run().await;
                 unregister_user_task(&task_username).await;
             });
@@ -461,6 +482,36 @@ mod tests {
             i.album = " ".to_string();
         }
         assert_eq!(manual_batch_label(&no_album), "One");
+    }
+
+    #[tokio::test]
+    async fn a_manual_download_fails_over_through_a_research() {
+        use test_support::{batch, group, ScriptedFinder, ScriptedOutcome, StubBackend};
+
+        // The picker sent two tracks and slskd answered for "Two" first.
+        let items = vec![item("p", "One", "1.flac"), item("p", "Two", "2.flac")];
+        let enqueued: Vec<QueuedDownload> = ["2.flac", "1.flac"]
+            .into_iter()
+            .map(|filename| QueuedDownload {
+                id: format!("t-{filename}"),
+                source: "p".to_string(),
+                item: filename.to_string(),
+                size: 0,
+                status: EnqueueStatus::Enqueued,
+            })
+            .collect();
+        let finder = ScriptedFinder::new(vec![vec![group(
+            "q",
+            vec![item("q", "Two", "q-2.flac")],
+            0.9,
+        )]]);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+
+        let mut pool = manual_pool(&enqueued, &items, finder.clone());
+        let queued = pool.enqueue_next(0, &backend, &batch("X")).await;
+
+        assert_eq!(queued.map(|q| q.source), Some("q".to_string()));
+        assert_eq!(finder.queries(), vec!["Kowloon Two".to_string()]);
     }
 
     #[tokio::test]

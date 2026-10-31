@@ -79,6 +79,12 @@ const BACKEND_STALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// so must judge them by the same rule.
 pub(crate) const FAILED_STATE_CONFIRM: Duration = Duration::from_secs(4);
 
+/// How long a watched transfer may go without a byte before it is given up
+/// for another source: one queued at a peer that never serves it, or one
+/// that stopped moving. It is only given up when another source can be had;
+/// without one it keeps its chance until `PER_TRACK_TIMEOUT`.
+const STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
 /// Row text for a slot that ran past `PER_TRACK_TIMEOUT` with no peer left.
 const TIMED_OUT: &str = "Download timed out after 1 hour";
 
@@ -110,6 +116,11 @@ struct TrackState {
     missing_since: Option<Instant>,
     /// When the track's transfer was first seen in a failed terminal state.
     failing_since: Option<Instant>,
+    /// When the transfer's byte count last changed, or the slot was bound.
+    /// `STALL_TIMEOUT` is measured from here.
+    progress_at: Instant,
+    /// The byte count the transfer last reported.
+    transferred: u64,
     phase: SlotPhase,
 }
 
@@ -123,6 +134,8 @@ impl TrackState {
             first_seen: None,
             missing_since: None,
             failing_since: None,
+            progress_at: Instant::now(),
+            transferred: 0,
             phase: SlotPhase::Watching,
         }
     }
@@ -930,6 +943,20 @@ impl DownloadMonitor {
                 }
             }
 
+            // A transfer that has not moved for STALL_TIMEOUT moves to another
+            // source if there is one, and otherwise keeps waiting.
+            if !is_terminal_state(&download.state) {
+                let state = &mut self.track_states[slot];
+                if download.transferred != state.transferred {
+                    state.transferred = download.transferred;
+                    state.progress_at = Instant::now();
+                } else if state.progress_at.elapsed() > STALL_TIMEOUT
+                    && self.try_failover(slot, backend, "Transfer stalled").await
+                {
+                    continue;
+                }
+            }
+
             // Singleton mode: process completed tracks immediately
             if !self.album_mode && is_completed(&download.state) {
                 info!(
@@ -1379,7 +1406,7 @@ pub fn filenames_match(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
     use crate::server_fns::download::test_support::{
-        batch, item, key, transfer, Cancel, ScriptedOutcome, StubBackend,
+        batch, group, item, key, transfer, Cancel, ScriptedFinder, ScriptedOutcome, StubBackend,
     };
     use tokio::sync::broadcast;
 
@@ -2400,5 +2427,176 @@ mod tests {
         assert_eq!(rows[0].id, "t-02");
         assert!(late.deliver(vec![]).is_err(), "a late join is handed back");
         assert!(TransferRegistry::global().may_adopt(&held, &batch("Y").owner));
+    }
+
+    /// A monitor watching one "Wake Up" from peer_a with no static
+    /// alternate, re-searching through `finder`.
+    fn researching_monitor(
+        finder: &Arc<ScriptedFinder>,
+    ) -> (DownloadMonitor, broadcast::Receiver<DownloadEvent>) {
+        let (tx, rx) = broadcast::channel(16);
+        let m = monitor_on(tx, vec!["peer_a"], vec!["dirA/aaa.flac"]).with_failover(
+            SourcePool::single(vec![item("peer_a", "Wake Up", "dirA/aaa.flac")])
+                .with_finder(finder.clone()),
+        );
+        (m, rx)
+    }
+
+    /// One re-search answer offering "Wake Up" from peer_z.
+    fn found_on_peer_z() -> Vec<Vec<shared::download::DownloadableGroup>> {
+        vec![vec![group(
+            "peer_z",
+            vec![item("peer_z", "Wake Up", "dirZ/zzz.flac")],
+            0.9,
+        )]]
+    }
+
+    #[tokio::test]
+    async fn a_stalled_transfer_fails_over_to_an_alternate() {
+        // Queued remotely and never a byte: the peer is not going to send it.
+        let (mut m, _rx) = failover_monitor();
+        let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+
+        poll_tracks(
+            &mut m,
+            &[listed("peer_a", "dirA/aaa.flac", DownloadState::Queued)],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_b");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert_eq!(
+            stub.cancelled(),
+            vec![Cancel::only("peer_a", &id_of("dirA/aaa.flac"))],
+            "the stalled transfer is cancelled in slskd"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_transfer_fails_over_to_a_researched_source() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (mut m, _rx) = researching_monitor(&finder);
+        let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+
+        poll_tracks(
+            &mut m,
+            &[listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(m.tracked_files[0].transfer_id, "t-dirZ/zzz.flac");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_transfer_without_an_alternate_keeps_waiting() {
+        let finder = ScriptedFinder::new(vec![]);
+        let (mut m, mut rx) = researching_monitor(&finder);
+        let stub = StubBackend::new(vec![]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+
+        poll_tracks(
+            &mut m,
+            &[listed("peer_a", "dirA/aaa.flac", DownloadState::Queued)],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
+        assert!(
+            stub.cancelled().is_empty(),
+            "nothing replaces it, so it runs on"
+        );
+        assert_eq!(
+            states_for(&mut rx, "dirA/aaa.flac"),
+            vec![DownloadState::Queued]
+        );
+        assert_eq!(finder.queries(), vec!["Kowloon Wake Up", "Wake Up"]);
+    }
+
+    #[tokio::test]
+    async fn byte_progress_resets_the_stall_clock() {
+        let (mut m, _rx) = failover_monitor();
+        let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+
+        let moving = DownloadProgress {
+            transferred: 4096,
+            ..listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)
+        };
+        poll_tracks(&mut m, &[moving], &backend).await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+        assert!(stub.cancelled().is_empty());
+        assert!(m.track_states[0].progress_at.elapsed() < STALL_TIMEOUT);
+        assert_eq!(m.track_states[0].transferred, 4096);
+    }
+
+    #[tokio::test]
+    async fn a_rebound_slot_starts_a_fresh_stall_clock() {
+        let (mut m, _rx) = failover_monitor();
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+        m.track_states[0].transferred = 4096;
+
+        poll_tracks(
+            &mut m,
+            &[listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_b");
+        assert!(m.track_states[0].progress_at.elapsed() < STALL_TIMEOUT);
+        assert_eq!(m.track_states[0].transferred, 0);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_transfer_never_researches() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (mut m, _rx) = researching_monitor(&finder);
+        let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+        m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
+
+        poll_tracks(
+            &mut m,
+            &[listed("peer_a", "dirA/aaa.flac", DownloadState::Cancelled)],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(phase(&m, 0), SlotPhase::Settled);
+        assert_eq!(m.tracked_files[0].source, "peer_a");
+        assert!(finder.queries().is_empty());
+        assert!(stub.destinations().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_transfer_with_no_static_alternate_researches() {
+        let finder = ScriptedFinder::new(found_on_peer_z());
+        let (mut m, _rx) = researching_monitor(&finder);
+        let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        m.track_states[0].failing_since = Some(ago(FAILED_STATE_CONFIRM + Duration::from_secs(1)));
+
+        poll_tracks(
+            &mut m,
+            &[failed_transfer("peer_a", "dirA/aaa.flac")],
+            &backend,
+        )
+        .await;
+
+        assert_eq!(m.tracked_files[0].source, "peer_z");
+        assert_eq!(phase(&m, 0), SlotPhase::Watching);
     }
 }
