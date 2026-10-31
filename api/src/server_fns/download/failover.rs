@@ -296,10 +296,16 @@ impl SourcePool {
     /// Single track, N ranked sources. `items[0]` is the source already
     /// enqueued; the rest are its alternates.
     pub fn single(items: Vec<DownloadableItem>) -> Self {
-        let mut items = items.into_iter();
-        let track = items.next();
+        // Workaround for a std bug (seen on 1.90-1.92): collecting a fully
+        // drained `vec::IntoIter` into a `VecDeque` reuses the buffer with
+        // `head == capacity`, so a later `extend` + `pop_front` reads past the
+        // allocation. `VecDeque::from(Vec)` + `pop_front` keeps `head` in
+        // bounds. `research_drops_candidates_whose_duration_is_off` crashed
+        // on this.
+        let mut items = VecDeque::from(items);
+        let track = items.pop_front();
         Self {
-            slots: vec![Slot::new(track, items.collect())],
+            slots: vec![Slot::new(track, items)],
             finder: None,
         }
     }
