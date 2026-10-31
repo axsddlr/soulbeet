@@ -11,9 +11,9 @@ pub struct Props {
 #[component]
 pub fn AlbumFooter(props: Props) -> Element {
     rsx! {
-      div { class: "p-4 border-t border-white/10 mt-auto",
+      div { class: "p-4 border-t border-white/10 mt-auto flex justify-center",
         Button {
-          class: "w-full",
+          class: "w-full sm:w-auto sm:px-10",
           disabled: props.is_selection_empty,
           onclick: move |_| props.on_select.call(()),
           div { class: "flex items-center justify-center gap-2",

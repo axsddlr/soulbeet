@@ -46,11 +46,11 @@ pub fn FolderChip(props: FolderChipProps) -> Element {
     };
 
     let chip_class = if is_open {
-        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono rounded-md transition-all duration-200 cursor-pointer bg-white/10 border border-white/10 text-white mr-2"
+        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-full transition-all duration-200 cursor-pointer bg-white/10 border border-white/10 text-white mr-2"
     } else if needs_attention {
-        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono rounded-md transition-all duration-200 cursor-pointer bg-white/5 border border-yellow-500/30 text-yellow-400 hover:bg-white/10 hover:text-yellow-300 mr-2"
+        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-full transition-all duration-200 cursor-pointer bg-white/5 border border-yellow-500/30 text-yellow-400 hover:bg-white/10 hover:text-yellow-300 mr-2"
     } else {
-        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono rounded-md transition-all duration-200 cursor-pointer bg-white/5 border border-white/5 text-gray-300 hover:bg-white/10 hover:text-white mr-2"
+        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-full transition-all duration-200 cursor-pointer bg-white/5 border border-white/5 text-white/80 hover:bg-white/10 hover:text-white mr-2"
     };
 
     rsx! {

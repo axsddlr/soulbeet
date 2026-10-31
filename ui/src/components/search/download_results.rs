@@ -52,7 +52,7 @@ fn quality_badge(item: &DownloadableItem) -> Element {
     let color = match quality {
         "flac" | "wav" => "bg-blue-600/30 text-blue-300 border-blue-500/40",
         "m4a" | "aac" | "ogg" => "bg-green-600/30 text-green-300 border-green-500/40",
-        _ => "bg-gray-600/30 text-gray-300 border-gray-500/40",
+        _ => "bg-white/10 text-white/80 border-white/10",
     };
 
     rsx! {
@@ -107,7 +107,7 @@ fn TrackItem(props: TrackItemProps) -> Element {
 
             Checkbox { is_selected: props.is_selected }
 
-            label { class: "cursor-pointer text-gray-300 font-mono text-sm flex-1 min-w-0 truncate",
+            label { class: "cursor-pointer text-white/80 font-mono text-sm flex-1 min-w-0 truncate",
                 "{props.track.title}"
             }
 
@@ -124,7 +124,7 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
     rsx! {
         div {
             key: "{album.group_id}",
-            class: "bg-white/5 border border-white/5 p-4 rounded-md",
+            class: "bg-white/[0.04] hover:bg-white/[0.07] transition-colors p-4 rounded-md",
 
             // Clickable header for expand/collapse
             div {
@@ -133,7 +133,7 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
 
                 div { class: "flex-grow",
                     div { class: "flex items-center gap-2",
-                        h4 { class: "text-md font-bold text-beet-leaf", "{album.title}" }
+                        h4 { class: "text-base font-bold text-white", "{album.title}" }
                         if props.is_best {
                             span {
                                 class: "text-[10px] font-mono px-1.5 py-0.5 rounded border bg-beet-accent/20 text-beet-accent border-beet-accent/40 uppercase shrink-0",
@@ -141,7 +141,7 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
                             }
                         }
                     }
-                    p { class: "text-sm text-gray-400 font-mono",
+                    p { class: "text-sm text-muted font-mono",
                         "{album.artist.clone().unwrap_or_default()} - Quality: {album.quality}, Score: {album.score:.2}"
                     }
                 }
@@ -149,7 +149,7 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
                 // Expand/collapse chevron
                 svg {
                     class: "w-4 h-4 transition-transform duration-200 shrink-0",
-                    class: if *is_expanded.read() { "rotate-90 text-gray-400" } else { "text-gray-600" },
+                    class: if *is_expanded.read() { "rotate-90 text-muted" } else { "text-muted/60" },
                     fill: "none",
                     stroke: "currentColor",
                     stroke_width: "2",
@@ -165,7 +165,7 @@ fn AlbumResultItem(props: AlbumResultItemProps) -> Element {
             // Track list and Select All only visible when expanded
             if *is_expanded.read() {
                 button {
-                    class: "font-mono uppercase text-[10px] whitespace-nowrap tracking-widest px-3 py-1 mb-2 border border-beet-leaf/30 text-beet-leaf hover:bg-beet-leaf hover:text-beet-dark transition-colors cursor-pointer rounded",
+                    class: "uppercase text-[10px] font-bold whitespace-nowrap tracking-wider px-3 py-1 mb-2 border border-white/30 text-white hover:border-white hover:scale-[1.03] transition-all cursor-pointer rounded-full",
                     onclick: move |_| props.on_album_select_all.call(album.clone()),
                     "Select All"
                 }
@@ -265,14 +265,14 @@ pub fn DownloadResults(props: Props) -> Element {
     };
 
     rsx! {
-        div { class: "bg-beet-panel border border-white/10 text-white p-6 sm:p-8 rounded-lg shadow-2xl w-full max-w-2xl mx-auto my-10 font-display relative",
+        div { class: "bg-beet-panel text-white p-6 sm:p-8 rounded-xl shadow-2xl shadow-black/50 w-full max-w-3xl mx-auto my-6 relative",
             div { class: "relative mb-6",
                 button {
                     class: "absolute left-0 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer",
                     aria_label: "Back",
                     onclick: move |_| props.on_back.call(()),
                     svg {
-                        class: "w-5 h-5 text-gray-400",
+                        class: "w-5 h-5 text-muted",
                         fill: "none",
                         stroke: "currentColor",
                         view_box: "0 0 24 24",
@@ -284,12 +284,12 @@ pub fn DownloadResults(props: Props) -> Element {
                         }
                     }
                 }
-                h3 { class: "text-2xl font-bold text-center text-beet-accent", "Download Options" }
+                h3 { class: "text-2xl font-bold text-center text-white tracking-tight", "Download Options" }
             }
             div { class: "mb-4",
                 label {
                     r#for: "dl_folder",
-                    class: "block text-sm font-medium mb-1 text-gray-400 font-mono",
+                    class: "block text-sm font-medium mb-1 text-muted font-mono",
                     "Select Target Folder"
                 }
                 select {
@@ -307,13 +307,13 @@ pub fn DownloadResults(props: Props) -> Element {
             div { class: "space-y-4",
                 if props.is_searching {
                     div { class: "flex flex-col items-center justify-center p-4 bg-white/5 rounded-lg",
-                        div { class: "animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-beet-accent mb-2" }
-                        p { class: "text-sm text-gray-300 animate-pulse text-center font-mono",
+                        div { class: "animate-spin rounded-full h-8 w-8 border-4 border-white/10 border-t-beet-accent mb-2" }
+                        p { class: "text-sm text-white/80 animate-pulse text-center font-mono",
                             "Searching... The rarer your track is, the longer the search can take."
                         }
                     }
                 } else if results.is_empty() {
-                    div { class: "text-center text-gray-500 py-8 font-mono", "No results found" }
+                    div { class: "text-center text-muted/80 py-8 font-mono", "No results found" }
                 }
                 for (idx, album) in results.iter().enumerate() {
                     AlbumResultItem {
@@ -326,15 +326,15 @@ pub fn DownloadResults(props: Props) -> Element {
                     }
                 }
             }
-            div { class: "fixed bottom-8 right-8",
+            div { class: "fixed bottom-36 md:bottom-28 right-6 md:right-10 z-40",
                 button {
-                    class: "bg-beet-accent hover:bg-fuchsia-400 text-white font-bold p-4 rounded-full shadow-[0_0_15px_rgba(255,0,255,0.5)] transition-transform hover:scale-105 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center cursor-pointer",
+                    class: "bg-beet-accent hover:bg-beet-leaf text-black font-bold p-4 rounded-full shadow-xl shadow-black/50 transition-transform hover:scale-105 disabled:bg-beet-dim disabled:text-muted/60 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center cursor-pointer",
                     aria_label: "Start download",
                     disabled: selected_tracks.read().is_empty() || selected_folder.read().is_empty() || *is_downloading.read(),
                     onclick: handle_download,
                     if *is_downloading.read() {
                         // Show spinner when downloading
-                        div { class: "animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white" }
+                        div { class: "animate-spin rounded-full h-6 w-6 border-2 border-black/20 border-t-black" }
                     } else {
                         svg {
                             class: "w-6 h-6",

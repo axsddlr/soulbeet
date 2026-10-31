@@ -25,8 +25,8 @@ pub fn AuthProvider(children: Element) -> Element {
     if !*initialized.read() {
         return rsx! {
             div { class: "flex flex-col items-center justify-center h-screen",
-                div { class: "animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-beet-accent mb-6" }
-                h1 { class: "text-2xl font-bold tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400",
+                div { class: "animate-spin rounded-full h-12 w-12 border-4 border-white/10 border-t-beet-accent mb-6" }
+                h1 { class: "text-2xl font-extrabold tracking-tight text-white",
                     "SoulBeet"
                 }
             }

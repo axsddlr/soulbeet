@@ -36,8 +36,8 @@ fn profile_badge_class(profile: &str) -> &'static str {
     match profile {
         "Conservative" => "bg-blue-600/30 text-blue-300 border-blue-500/40",
         "Balanced" => "bg-green-600/30 text-green-300 border-green-500/40",
-        "Adventurous" => "bg-purple-600/30 text-purple-300 border-purple-500/40",
-        _ => "bg-gray-600/30 text-gray-300 border-gray-500/40",
+        "Adventurous" => "bg-orange-600/30 text-orange-300 border-orange-500/40",
+        _ => "bg-white/10 text-white/80 border-white/10",
     }
 }
 
@@ -118,25 +118,25 @@ pub fn DiscoveryOverview() -> Element {
             h3 { class: "text-sm font-semibold text-white", "Discovery" }
 
             if matches!(nav_status, NavidromeStatus::InvalidCredentials | NavidromeStatus::Unknown) {
-                p { class: "text-xs font-mono text-beet-accent",
+                p { class: "text-xs text-yellow-400",
                     "Your username is not linked to Navidrome. Discovery playlists and rating sync require a matching Navidrome account."
                 }
             }
 
             match info {
                 None => rsx! {
-                    p { class: "text-gray-500 font-mono text-sm", "Loading..." }
+                    p { class: "text-muted/80 font-mono text-sm", "Loading..." }
                 },
                 Some(cfg) => {
                     if !cfg.enabled {
                         rsx! {
-                            p { class: "text-gray-500 font-mono text-sm",
+                            p { class: "text-muted/80 font-mono text-sm",
                                 "Discovery is not enabled. Turn it on in Settings > Library."
                             }
                         }
                     } else {
                         rsx! {
-                            div { class: "bg-beet-panel border border-white/10 rounded-lg p-4",
+                            div { class: "bg-beet-panel rounded-lg p-4",
                                 div { class: "flex justify-between items-start",
                                     div {
                                         if let Some(ref name) = cfg.folder_name {
@@ -148,9 +148,9 @@ pub fn DiscoveryOverview() -> Element {
                                                     let tc = cfg.track_counts.get(profile).copied().unwrap_or(10);
                                                     let lt = cfg.lifetime_days.get(profile).copied().unwrap_or(7);
                                                     rsx! {
-                                                        p { class: "text-gray-400 text-xs font-mono",
+                                                        p { class: "text-muted text-xs font-mono",
                                                             span { class: "text-green-400", "{name}" }
-                                                            span { class: "text-gray-600 ml-1", "({tc} tracks / {lt}d)" }
+                                                            span { class: "text-muted/60 ml-1", "({tc} tracks / {lt}d)" }
                                                         }
                                                     }
                                                 }
@@ -160,7 +160,7 @@ pub fn DiscoveryOverview() -> Element {
                                             {
                                                 let ago = format_relative_time(ts);
                                                 rsx! {
-                                                    p { class: "text-gray-500 text-xs font-mono mt-1",
+                                                    p { class: "text-muted/80 text-xs font-mono mt-1",
                                                         "Last generated: {ago}"
                                                     }
                                                 }
@@ -169,7 +169,7 @@ pub fn DiscoveryOverview() -> Element {
                                     }
                                     div { class: "flex flex-col items-end gap-2",
                                         button {
-                                            class: "retro-btn rounded text-xs",
+                                            class: "retro-btn text-xs",
                                             disabled: is_generating,
                                             onclick: handle_generate,
                                             if is_generating { "Generating..." } else { "Generate" }
@@ -202,7 +202,7 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
     match progress.status {
         GenerationStatus::Running => {
             rsx! {
-                div { class: "mt-4 bg-beet-dark/50 border border-white/10 rounded-lg p-4",
+                div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
                     p { class: "text-xs font-mono font-semibold text-white mb-3 uppercase tracking-wider",
                         "Generating Discovery"
                     }
@@ -232,10 +232,10 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
                 })
                 .unwrap_or_default();
             rsx! {
-                div { class: "mt-4 bg-beet-dark/50 border border-white/10 rounded-lg p-4",
+                div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
                     p { class: "text-xs font-mono text-beet-leaf", "{total} tracks imported" }
                     if !detail.is_empty() {
-                        p { class: "text-xs font-mono text-gray-400 mt-1", "{detail}" }
+                        p { class: "text-xs font-mono text-muted mt-1", "{detail}" }
                     }
                 }
             }
@@ -243,7 +243,7 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
         GenerationStatus::Error => {
             let msg = progress.error.as_deref().unwrap_or("Unknown error");
             rsx! {
-                div { class: "mt-4 bg-beet-dark/50 border border-white/10 rounded-lg p-4",
+                div { class: "mt-4 bg-white/[0.04] rounded-lg p-4",
                     p { class: "text-xs font-mono text-red-400", "{msg}" }
                 }
             }
@@ -255,9 +255,9 @@ fn ProgressPanel(progress: DiscoveryProgress) -> Element {
 fn render_profile_row(pp: &shared::navidrome::ProfileProgress) -> Element {
     let badge_class = profile_badge_class(&pp.profile);
     let phase_color = match pp.phase {
-        ProfilePhase::Waiting => "text-gray-500",
+        ProfilePhase::Waiting => "text-muted/80",
         ProfilePhase::Done => "text-beet-leaf",
-        ProfilePhase::Skipped => "text-gray-600",
+        ProfilePhase::Skipped => "text-muted/60",
         _ => "text-white",
     };
     let phase_text = pp.phase.to_string();
@@ -279,13 +279,13 @@ fn render_profile_row(pp: &shared::navidrome::ProfileProgress) -> Element {
             }
             span { class: "text-xs font-mono {phase_color} flex-1", "{phase_text}" }
             if show_bar {
-                div { class: "h-1.5 w-24 bg-gray-800 rounded-full overflow-hidden relative shrink-0",
+                div { class: "h-1.5 w-24 bg-white/10 rounded-full overflow-hidden relative shrink-0",
                     div {
                         class: "h-full bg-beet-accent absolute top-0 left-0 transition-all duration-300",
                         style: "width: {percent}%",
                     }
                 }
-                span { class: "text-xs font-mono text-gray-400 w-12 text-right shrink-0",
+                span { class: "text-xs font-mono text-muted w-12 text-right shrink-0",
                     "{pp.current}/{pp.total}"
                 }
             }
@@ -318,7 +318,7 @@ fn EngineReportView() -> Element {
         Disclosure { class: "mt-4", label: "engine reports", on_open: load,
             div { class: "mt-2 max-h-96 overflow-y-auto border border-white/10 rounded bg-beet-dark",
                 if entries().is_empty() {
-                    p { class: "p-3 text-xs font-mono text-gray-500",
+                    p { class: "p-3 text-xs font-mono text-muted/80",
                         "No engine reports available. Run discovery generation first."
                     }
                 } else {
@@ -345,14 +345,14 @@ fn EngineReportView() -> Element {
                                             class: "text-xs font-mono px-1.5 py-0.5 rounded border {badge_class}",
                                             "{badge_label}"
                                         }
-                                        span { class: "text-xs font-mono text-gray-500 flex-1", "{date}" }
-                                        span { class: "text-xs font-mono text-gray-400", "{count} candidates" }
-                                        span { class: "text-xs text-gray-600 ml-1",
+                                        span { class: "text-xs font-mono text-muted/80 flex-1", "{date}" }
+                                        span { class: "text-xs font-mono text-muted", "{count} candidates" }
+                                        span { class: "text-xs text-muted/60 ml-1",
                                             if is_expanded { "\u{25BC}" } else { "\u{25B6}" }
                                         }
                                     }
                                     if is_expanded {
-                                        pre { class: "px-3 pb-3 text-xs font-mono text-gray-400 whitespace-pre-wrap overflow-x-auto",
+                                        pre { class: "px-3 pb-3 text-xs font-mono text-muted whitespace-pre-wrap overflow-x-auto",
                                             "{text}"
                                         }
                                     }
@@ -424,7 +424,7 @@ fn DiscoveryTrackList() -> Element {
 
     if active.is_empty() && history.is_empty() {
         return rsx! {
-            p { class: "text-gray-500 font-mono text-sm", "No discovery tracks" }
+            p { class: "text-muted/80 font-mono text-sm", "No discovery tracks" }
         };
     }
 
@@ -442,7 +442,7 @@ fn DiscoveryTrackList() -> Element {
                                     class: "text-xs font-mono px-1.5 py-0.5 rounded border {badge_class}",
                                     "{profile}"
                                 }
-                                span { class: "text-xs font-mono text-gray-500",
+                                span { class: "text-xs font-mono text-muted/80",
                                     "{count} tracks"
                                 }
                             }
@@ -454,12 +454,12 @@ fn DiscoveryTrackList() -> Element {
                                     let artist_remove = track.artist.clone();
                                     let promote_error = promote_errors.read().get(&track.id).cloned();
                                     rsx! {
-                                        div { class: "p-2 bg-beet-panel border border-white/10 rounded text-sm",
+                                        div { class: "p-2 bg-beet-panel rounded text-sm",
                                             div { class: "flex items-center justify-between",
                                                 div { class: "flex-1 min-w-0",
                                                     span { class: "text-white truncate", "{track.title}" }
-                                                    span { class: "text-gray-400 mx-2", "-" }
-                                                    span { class: "text-gray-400 truncate", "{track.artist}" }
+                                                    span { class: "text-muted mx-2", "-" }
+                                                    span { class: "text-muted truncate", "{track.artist}" }
                                                     if let Some(r) = track.rating {
                                                         span { class: "text-yellow-500 text-xs font-mono ml-2",
                                                             "({r})"
@@ -509,13 +509,13 @@ fn DiscoveryTrackList() -> Element {
                                 let (icon, color) = match track.status {
                                     DiscoveryStatus::Promoted => ("\u{2713}", "text-green-600"),
                                     DiscoveryStatus::Removed => ("\u{2717}", "text-red-600"),
-                                    _ => ("", "text-gray-600"),
+                                    _ => ("", "text-muted/60"),
                                 };
                                 rsx! {
-                                    div { class: "flex items-center gap-2 px-2 py-1 text-xs font-mono text-gray-600",
+                                    div { class: "flex items-center gap-2 px-2 py-1 text-xs font-mono text-muted/60",
                                         span { class: "{color}", "{icon}" }
                                         span { "{track.artist} - {track.title}" }
-                                        span { class: "text-gray-700 ml-auto",
+                                        span { class: "text-muted/40 ml-auto",
                                             "{track.profile}"
                                         }
                                     }

@@ -28,10 +28,10 @@ pub fn FallbackToast(props: FallbackToastProps) -> Element {
     let results = toast.results.clone();
 
     rsx! {
-        div { class: "bg-beet-panel border border-white/10 rounded-lg shadow-2xl p-4 relative",
+        div { class: "bg-beet-dim rounded-lg shadow-2xl shadow-black/60 p-4 relative",
             // Close button
             button {
-                class: "absolute top-2 right-2 text-gray-500 hover:text-white cursor-pointer p-1",
+                class: "absolute top-2 right-2 text-muted/80 hover:text-white cursor-pointer p-1",
                 onclick: move |_| {
                     on_dismiss.call(toast_id.clone());
                 },
@@ -50,13 +50,13 @@ pub fn FallbackToast(props: FallbackToastProps) -> Element {
             }
 
             // Line 1: fallback message
-            p { class: "text-sm text-gray-300 font-mono pr-6",
+            p { class: "text-sm text-white pr-6",
                 "No confident match for {track_name}."
             }
 
             // Line 2: pick source link
             p {
-                class: "text-xs text-beet-leaf font-mono cursor-pointer hover:underline mt-1",
+                class: "text-xs font-bold text-beet-leaf cursor-pointer hover:underline mt-1",
                 onclick: move |_| {
                     on_pick_source.call(results.clone());
                     on_dismiss.call(toast_id_pick.clone());

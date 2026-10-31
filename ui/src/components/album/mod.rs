@@ -5,7 +5,7 @@ use shared::{
 };
 use std::collections::HashSet;
 
-use crate::album::{footer::AlbumFooter, track_list::TrackList};
+use crate::album::{footer::AlbumFooter, header::AlbumHeader as Header, track_list::TrackList};
 
 mod footer;
 mod header;
@@ -52,6 +52,10 @@ pub fn Album(props: Props) -> Element {
     };
 
     rsx! {
+        Header {
+            album: props.data.album.clone(),
+            track_count: Some(props.data.tracks.len()),
+        }
         TrackList {
             tracks,
             selected_tracks,

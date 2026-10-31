@@ -35,9 +35,9 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
     let selected_folder_id = &props.selected_folder_id;
 
     let align_class = if props.align == "right" {
-        "absolute right-0 top-full mt-2 w-52 bg-beet-panel border border-white/10 rounded-lg shadow-2xl z-50 overflow-hidden"
+        "absolute right-0 top-full mt-2 w-52 bg-beet-dim rounded-md shadow-2xl shadow-black/60 z-50 overflow-hidden p-1"
     } else {
-        "absolute left-0 top-full mt-2 w-52 bg-beet-panel border border-white/10 rounded-lg shadow-2xl z-50 overflow-hidden"
+        "absolute left-0 top-full mt-2 w-52 bg-beet-dim rounded-md shadow-2xl shadow-black/60 z-50 overflow-hidden p-1"
     };
 
     rsx! {
@@ -47,7 +47,7 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
 
             // Header
             div { class: "px-3 py-2 border-b border-white/5",
-                p { class: "text-[10px] font-mono text-gray-500 uppercase tracking-widest", "Download to" }
+                p { class: "text-[10px] font-mono text-muted/80 uppercase tracking-widest", "Download to" }
             }
 
             // Folder list
@@ -58,9 +58,9 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
                     rsx! {
                         button {
                             class: if is_active {
-                                "flex items-center gap-2 w-full text-left px-3 py-2.5 text-sm font-mono cursor-pointer bg-beet-leaf/10 text-beet-leaf"
+                                "flex items-center gap-2 w-full text-left px-3 py-2.5 rounded-sm text-sm cursor-pointer bg-white/10 text-beet-leaf"
                             } else {
-                                "flex items-center gap-2 w-full text-left px-3 py-2.5 hover:bg-white/5 text-sm font-mono cursor-pointer text-gray-300"
+                                "flex items-center gap-2 w-full text-left px-3 py-2.5 rounded-sm hover:bg-white/10 text-sm cursor-pointer text-white"
                             },
                             onclick: move |_| on_select_folder.call(folder_clone.clone()),
                             if is_active {
@@ -100,7 +100,7 @@ pub fn FolderDropdown(props: FolderDropdownProps) -> Element {
             if props.show_quality {
                 div { class: "border-t border-white/5" }
                 div { class: "px-3 py-2",
-                    p { class: "text-[10px] font-mono text-gray-600 italic", "Quality: auto" }
+                    p { class: "text-[10px] font-mono text-muted/60 italic", "Quality: auto" }
                 }
             }
         }

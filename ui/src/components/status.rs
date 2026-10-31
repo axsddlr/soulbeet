@@ -35,7 +35,7 @@ pub fn SystemStatus(health: SystemHealth, navidrome_status: NavidromeStatus) -> 
     );
 
     rsx! {
-      div { class: "flex justify-center gap-6 text-xs font-mono text-gray-500 flex-wrap",
+      div { class: "flex justify-center gap-6 text-xs font-mono text-muted/80 flex-wrap",
         span { class: "flex items-center gap-2",
           span {
             class: format!(

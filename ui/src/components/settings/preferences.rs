@@ -63,8 +63,8 @@ pub fn PreferencesManager() -> Element {
     };
 
     rsx! {
-        div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-            h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display", "Search Preferences" }
+        div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+            h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight", "Search Preferences" }
 
             if !error().is_empty() {
                 div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 font-mono text-sm",
@@ -79,7 +79,7 @@ pub fn PreferencesManager() -> Element {
 
             div { class: "space-y-4 mb-6",
                 div {
-                    label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
                         "Default Metadata Provider"
                     }
                     select {
@@ -103,7 +103,7 @@ pub fn PreferencesManager() -> Element {
                             "This provider requires an API key. Configure it in the Config tab."
                         }
                     } else {
-                        p { class: "text-xs text-gray-500 mt-1 font-mono",
+                        p { class: "text-xs text-muted/80 mt-1 font-mono",
                             "Choose which service to use for searching albums and tracks."
                         }
                     }
@@ -111,7 +111,7 @@ pub fn PreferencesManager() -> Element {
             }
 
             button {
-                class: "retro-btn rounded",
+                class: "retro-btn",
                 disabled: saving(),
                 onclick: handle_save,
                 if saving() {

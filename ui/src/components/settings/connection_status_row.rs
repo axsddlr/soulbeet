@@ -24,10 +24,10 @@ pub(crate) fn ConnectionStatusRow(props: ConnectionStatusRowProps) -> Element {
             h3 { class: "text-sm font-semibold text-white mb-3", "{props.label}" }
             div { class: "flex items-center gap-2 mb-2",
                 span { class: "w-2 h-2 rounded-full shrink-0 {props.dot_class}" }
-                span { class: "text-xs font-mono text-gray-300", "{props.summary}" }
+                span { class: "text-xs font-mono text-white/80", "{props.summary}" }
             }
             if let Some(note) = &props.note {
-                p { class: "text-xs text-gray-400 font-mono", "{note}" }
+                p { class: "text-xs text-muted font-mono", "{note}" }
             }
             if let Some(details) = props.details {
                 Disclosure { class: "mt-2", label: "details", {details} }
@@ -81,10 +81,10 @@ pub(crate) fn ImporterDetails(health: ImporterHealth) -> Element {
                         li {
                             div { class: "flex items-baseline gap-2",
                                 span { class: issue_class(issue.severity), "{issue.severity.chip()}" }
-                                span { class: "text-gray-300", "{issue.title}" }
+                                span { class: "text-white/80", "{issue.title}" }
                             }
                             if !issue.detail.is_empty() {
-                                p { class: "text-gray-500 mt-0.5 whitespace-pre-wrap break-words", "{issue.detail}" }
+                                p { class: "text-muted/80 mt-0.5 whitespace-pre-wrap break-words", "{issue.detail}" }
                             }
                         }
                     }
@@ -93,8 +93,8 @@ pub(crate) fn ImporterDetails(health: ImporterHealth) -> Element {
             if !health.facts.is_empty() {
                 dl { class: "grid grid-cols-[auto_1fr] gap-x-3 gap-y-1",
                     for (name, value) in health.facts.iter() {
-                        dt { class: "text-gray-500", "{name}" }
-                        dd { class: "text-gray-300 break-all", "{value}" }
+                        dt { class: "text-muted/80", "{name}" }
+                        dd { class: "text-white/80 break-all", "{value}" }
                     }
                 }
             }
@@ -106,7 +106,7 @@ fn issue_class(severity: HealthLevel) -> &'static str {
     match severity {
         HealthLevel::Broken => "text-red-400 shrink-0",
         HealthLevel::Degraded => "text-yellow-400 shrink-0",
-        HealthLevel::Ready | HealthLevel::Checking => "text-gray-500 shrink-0",
+        HealthLevel::Ready | HealthLevel::Checking => "text-muted/80 shrink-0",
     }
 }
 

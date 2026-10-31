@@ -16,19 +16,19 @@ pub fn AppConfigManager() -> Element {
     let config = match &*config_resource.read() {
         None => {
             return rsx! {
-                div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-                    div { class: "animate-pulse text-gray-400 font-mono", "Loading..." }
+                div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+                    div { class: "animate-pulse text-muted font-mono", "Loading..." }
                 }
             };
         }
         Some(Err(e)) => {
             let msg = friendly_error(e);
             return rsx! {
-                div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-                    h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display", "Connections" }
+                div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+                    h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight", "Connections" }
                     div { class: "text-red-400 text-sm font-mono mb-3", "{msg}" }
                     button {
-                        class: "text-xs font-mono text-gray-400 hover:text-white underline decoration-dotted cursor-pointer",
+                        class: "text-xs font-mono text-muted hover:text-white underline decoration-dotted cursor-pointer",
                         onclick: move |_| config_resource.restart(),
                         "Retry"
                     }
@@ -65,8 +65,8 @@ pub fn AppConfigManager() -> Element {
     };
 
     rsx! {
-        div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-            h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display", "Connections" }
+        div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+            h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight", "Connections" }
 
             if !error().is_empty() {
                 div { class: "mb-4 p-4 bg-red-900/20 border border-red-500/50 rounded text-red-400 font-mono text-sm",
@@ -85,7 +85,7 @@ pub fn AppConfigManager() -> Element {
                     h3 { class: "text-sm font-semibold text-white mb-3", "Soulseek (slskd)" }
                     div { class: "space-y-4",
                         div {
-                            label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider", "slskd URL" }
+                            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "slskd URL" }
                             TextInput {
                                 value: slskd_url(),
                                 oninput: move |v| slskd_url.set(v),
@@ -93,7 +93,7 @@ pub fn AppConfigManager() -> Element {
                             }
                         }
                         div {
-                            label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider", "slskd API Key" }
+                            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "slskd API Key" }
                             TextInput {
                                 value: slskd_api_key(),
                                 oninput: move |v| slskd_api_key.set(v),
@@ -138,7 +138,7 @@ pub fn AppConfigManager() -> Element {
             }
 
             button {
-                class: "retro-btn rounded",
+                class: "retro-btn",
                 disabled: saving(),
                 onclick: handle_save,
                 if saving() { "Saving..." } else { "Save Configuration" }

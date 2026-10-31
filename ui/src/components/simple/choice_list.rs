@@ -40,14 +40,14 @@ pub fn ChoiceList(props: ChoiceListProps) -> Element {
                 {
                     let checked = props.selected == Some(i);
                     let (row, dot) = if checked {
-                        ("border-beet-leaf/50 bg-beet-leaf/10", "border-beet-leaf")
+                        ("border-beet-accent/50 bg-white/10", "border-beet-accent")
                     } else {
-                        ("border-white/10 hover:bg-white/5", "border-gray-500")
+                        ("border-transparent bg-white/[0.04] hover:bg-white/10", "border-muted")
                     };
                     rsx! {
                         // relative keeps the sr-only radio inside its option, so
                         // focusing it scrolls this option into view.
-                        label { class: "relative flex items-start gap-2 p-2 rounded border cursor-pointer transition-colors has-focus-visible:border-beet-accent {row}",
+                        label { class: "relative flex items-start gap-2 p-2 rounded-md border cursor-pointer transition-colors has-focus-visible:border-white {row}",
                             input {
                                 class: "sr-only",
                                 r#type: "radio",
@@ -59,7 +59,7 @@ pub fn ChoiceList(props: ChoiceListProps) -> Element {
                                 class: "mt-0.5 w-4 h-4 shrink-0 rounded-full border flex items-center justify-center {dot}",
                                 aria_hidden: true,
                                 if checked {
-                                    span { class: "w-2 h-2 rounded-full bg-beet-leaf" }
+                                    span { class: "w-2 h-2 rounded-full bg-beet-accent" }
                                 }
                             }
                             span { class: "min-w-0 flex-1",
@@ -70,10 +70,10 @@ pub fn ChoiceList(props: ChoiceListProps) -> Element {
                                     }
                                 }
                                 if let Some(detail) = &choice.detail {
-                                    span { class: "block text-xs text-gray-400 break-words", "{detail}" }
+                                    span { class: "block text-xs text-muted break-words", "{detail}" }
                                 }
                                 if let Some(note) = &choice.note {
-                                    span { class: "block text-[10px] font-mono text-gray-500 break-words", "{note}" }
+                                    span { class: "block text-[10px] font-mono text-muted/80 break-words", "{note}" }
                                 }
                             }
                         }

@@ -169,8 +169,8 @@ pub fn FolderManager() -> Element {
 
     rsx! {
         div { class: "space-y-6",
-        div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-            h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display", "Manage Music Folders" }
+        div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+            h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight", "Manage Music Folders" }
 
             // Local Messages
             if !error().is_empty() {
@@ -186,7 +186,7 @@ pub fn FolderManager() -> Element {
 
             div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-4",
                 div {
-                    label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
                         "Folder Name (e.g., 'Music/Common')"
                     }
                     TextInput {
@@ -196,7 +196,7 @@ pub fn FolderManager() -> Element {
                     }
                 }
                 div {
-                    label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
                         "Folder Path"
                     }
                     TextInput {
@@ -207,14 +207,14 @@ pub fn FolderManager() -> Element {
                 }
             }
 
-            button { class: "retro-btn mb-6 rounded", onclick: handle_add_folder, "Add Folder" }
+            button { class: "retro-btn mb-6", onclick: handle_add_folder, "Add Folder" }
 
             // Existing Folders List
-            h3 { class: "text-lg font-bold mb-2 text-white font-display border-b border-white/10 pb-2",
+            h3 { class: "text-lg font-bold mb-2 text-white border-b border-white/10 pb-2",
                 "Existing Folders"
             }
             if folders.read().is_empty() {
-                p { class: "text-gray-500 font-mono italic", "No folders added yet." }
+                p { class: "text-muted/80 font-mono italic", "No folders added yet." }
             } else {
                 ul { class: "space-y-2",
                     {
@@ -249,7 +249,7 @@ pub fn FolderManager() -> Element {
                                                         "[ Save ]"
                                                     }
                                                     button {
-                                                        class: "text-xs uppercase tracking-wider font-bold text-gray-500 hover:text-white transition-colors",
+                                                        class: "text-xs uppercase tracking-wider font-bold text-muted/80 hover:text-white transition-colors",
                                                         onclick: move |_| editing_folder_id.set(None),
                                                         "[ Cancel ]"
                                                     }
@@ -258,12 +258,12 @@ pub fn FolderManager() -> Element {
                                         } else {
                                             div { class: "flex justify-between items-center",
                                                 div {
-                                                    span { class: "font-bold text-white block font-display", "{folder.name}" }
-                                                    span { class: "text-gray-500 text-xs font-mono", "{folder.path}" }
+                                                    span { class: "font-bold text-white block", "{folder.name}" }
+                                                    span { class: "text-muted/80 text-xs font-mono", "{folder.path}" }
                                                 }
                                                 div { class: "flex gap-3",
                                                     button {
-                                                        class: "text-xs font-mono text-gray-400 hover:text-beet-accent transition-colors underline decoration-dotted",
+                                                        class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted",
                                                         onclick: move |_| {
                                                             edit_folder_name.set(folder.name.clone());
                                                             edit_folder_path.set(folder.path.clone());
@@ -272,7 +272,7 @@ pub fn FolderManager() -> Element {
                                                         "Edit"
                                                     }
                                                     button {
-                                                        class: "text-xs font-mono text-gray-400 hover:text-red-400 transition-colors underline decoration-dotted",
+                                                        class: "text-xs font-mono text-muted hover:text-red-400 transition-colors underline decoration-dotted",
                                                         onclick: move |_| handle_delete_folder(id_delete.clone()),
                                                         "Delete"
                                                     }
@@ -288,19 +288,19 @@ pub fn FolderManager() -> Element {
         }
 
         // Library Settings
-        div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10 mt-6",
-            h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display", "Library Settings" }
+        div { class: "bg-beet-panel p-6 rounded-lg relative z-10 mt-6",
+            h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight", "Library Settings" }
 
             match &*settings_resource.read() {
                 None => rsx! {
-                    div { class: "animate-pulse text-gray-400 font-mono", "Loading..." }
+                    div { class: "animate-pulse text-muted font-mono", "Loading..." }
                 },
                 Some(Err(e)) => {
                     let msg = friendly_error(e);
                     rsx! {
                         div { class: "text-red-400 text-sm font-mono mb-3", "{msg}" }
                         button {
-                            class: "text-xs font-mono text-gray-400 hover:text-white underline decoration-dotted cursor-pointer",
+                            class: "text-xs font-mono text-muted hover:text-white underline decoration-dotted cursor-pointer",
                             onclick: move |_| settings_resource.restart(),
                             "Retry"
                         }
@@ -311,22 +311,22 @@ pub fn FolderManager() -> Element {
                     // Discovery (user-level)
                     div {
                         h3 { class: "text-sm font-semibold text-white mb-3", "Discovery" }
-                        p { class: "text-xs text-gray-500 font-mono mb-4",
+                        p { class: "text-xs text-muted/80 font-mono mb-4",
                             "Automatically download new tracks for listening based on your scrobble history."
                         }
                         div { class: "space-y-3",
                             // Enable/disable toggle
-                            div { class: "flex items-center justify-between p-3 bg-beet-dark rounded border border-white/10",
+                            div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                                 div {
                                     p { class: "text-sm text-white font-medium", "Enable Discovery" }
-                                    p { class: "text-xs text-gray-500 font-mono mt-0.5",
+                                    p { class: "text-xs text-muted/80 font-mono mt-0.5",
                                         "Periodically generate a playlist of new tracks to try"
                                     }
                                 }
                                 button {
                                     class: format!(
                                         "relative w-11 h-6 rounded-full cursor-pointer transition-colors {}",
-                                        if discovery_enabled() { "bg-beet-leaf" } else { "bg-gray-600" }
+                                        if discovery_enabled() { "bg-beet-leaf" } else { "bg-white/20" }
                                     ),
                                     onclick: move |_| async move {
                                         let new_val = !discovery_enabled();
@@ -348,13 +348,13 @@ pub fn FolderManager() -> Element {
 
                             if discovery_enabled() {
                                 // Folder selector
-                                div { class: "p-3 bg-beet-dark rounded border border-white/10",
-                                    label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider", "Download Folder" }
+                                div { class: "p-3 bg-white/[0.04] rounded-md",
+                                    label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "Download Folder" }
                                     if folders.read().is_empty() {
-                                        p { class: "text-gray-500 font-mono text-sm italic", "No folders configured. Add a folder above first." }
+                                        p { class: "text-muted/80 font-mono text-sm italic", "No folders configured. Add a folder above first." }
                                     } else {
                                         select {
-                                            class: "w-full p-2 rounded bg-beet-panel border border-white/10 text-white font-mono text-sm",
+                                            class: "w-full p-2 rounded bg-beet-panel text-white font-mono text-sm",
                                             value: "{discovery_folder_id}",
                                             onchange: move |e| async move {
                                                 let val = e.value();
@@ -378,13 +378,13 @@ pub fn FolderManager() -> Element {
                                 }
 
                                 // Playlists: toggle + name + track count + lifetime per profile
-                                div { class: "p-3 bg-beet-dark rounded border border-white/10",
-                                    label { class: "block text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider", "Playlists" }
+                                div { class: "p-3 bg-white/[0.04] rounded-md",
+                                    label { class: "block text-xs font-mono text-muted mb-2 uppercase tracking-wider", "Playlists" }
                                     div { class: "space-y-2",
                                         for (label, value, color, name_signal, tc_signal, lt_signal) in [
                                             ("Safe", "Conservative", "border-blue-500/40 bg-blue-600/10", &pl_name_safe, &tc_safe, &lt_safe),
                                             ("Mix", "Balanced", "border-green-500/40 bg-green-600/10", &pl_name_mix, &tc_mix, &lt_mix),
-                                            ("Wild", "Adventurous", "border-purple-500/40 bg-purple-600/10", &pl_name_wild, &tc_wild, &lt_wild),
+                                            ("Wild", "Adventurous", "border-orange-500/40 bg-orange-600/10", &pl_name_wild, &tc_wild, &lt_wild),
                                         ] {
                                             {
                                                 let active = discovery_profiles().split(',').any(|p| p.trim() == value);
@@ -399,7 +399,7 @@ pub fn FolderManager() -> Element {
                                                             button {
                                                                 class: format!(
                                                                     "shrink-0 w-16 py-0.5 text-xs font-mono rounded cursor-pointer transition-colors text-center {}",
-                                                                    if active { "bg-white/15 text-white" } else { "bg-white/5 text-gray-500" }
+                                                                    if active { "bg-white/15 text-white" } else { "bg-white/5 text-muted/80" }
                                                                 ),
                                                                 onclick: move |_| async move {
                                                                     let current: Vec<String> = discovery_profiles().split(',')
@@ -425,7 +425,7 @@ pub fn FolderManager() -> Element {
                                                             }
                                                             // Name input
                                                             input {
-                                                                class: "flex-1 p-1 rounded bg-beet-panel/50 border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs",
+                                                                class: "flex-1 p-1 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs",
                                                                 value: "{name_signal}",
                                                                 disabled: !active,
                                                                 oninput: {
@@ -451,9 +451,9 @@ pub fn FolderManager() -> Element {
                                                         if active {
                                                             div { class: "flex gap-2 mt-1.5 ml-18",
                                                                 div { class: "flex items-center gap-1",
-                                                                    span { class: "text-[10px] font-mono text-gray-500", "Tracks" }
+                                                                    span { class: "text-[10px] font-mono text-muted/80", "Tracks" }
                                                                     input {
-                                                                        class: "w-12 p-0.5 rounded bg-beet-panel/50 border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
+                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
                                                                         "type": "number",
                                                                         min: "1",
                                                                         max: "50",
@@ -477,9 +477,9 @@ pub fn FolderManager() -> Element {
                                                                     }
                                                                 }
                                                                 div { class: "flex items-center gap-1",
-                                                                    span { class: "text-[10px] font-mono text-gray-500", "Days" }
+                                                                    span { class: "text-[10px] font-mono text-muted/80", "Days" }
                                                                     input {
-                                                                        class: "w-12 p-0.5 rounded bg-beet-panel/50 border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
+                                                                        class: "w-12 p-0.5 rounded bg-beet-panel border border-white/5 focus:border-beet-accent focus:outline-none text-white font-mono text-xs text-center",
                                                                         "type": "number",
                                                                         min: "1",
                                                                         max: "90",
@@ -515,13 +515,13 @@ pub fn FolderManager() -> Element {
                     }
 
                     // Last.fm
-                    div { class: "p-3 bg-beet-dark rounded border border-white/10",
+                    div { class: "p-3 bg-white/[0.04] rounded-md",
                         p { class: "text-sm text-white font-medium mb-2", "Last.fm" }
                         div { class: "space-y-3",
                             div {
-                                label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider", "Username" }
+                                label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "Username" }
                                 input {
-                                    class: "w-full p-2 rounded bg-beet-panel border border-white/10 focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
                                     value: "{lastfm_username}",
                                     oninput: move |e| lastfm_username.set(e.value()),
                                     onchange: move |_| async move {
@@ -535,9 +535,9 @@ pub fn FolderManager() -> Element {
                                 }
                             }
                             div {
-                                label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider", "API Key" }
+                                label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider", "API Key" }
                                 input {
-                                    class: "w-full p-2 rounded bg-beet-panel border border-white/10 focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                    class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
                                     value: "{lastfm_api_key}",
                                     oninput: move |e| lastfm_api_key.set(e.value()),
                                     onchange: move |_| async move {
@@ -550,7 +550,7 @@ pub fn FolderManager() -> Element {
                                     placeholder: "Enter Last.fm API key",
                                     "type": "password",
                                 }
-                                p { class: "text-xs text-gray-500 font-mono mt-1",
+                                p { class: "text-xs text-muted/80 font-mono mt-1",
                                     "Get one at "
                                     a {
                                         href: "https://www.last.fm/api/account/create",
@@ -564,11 +564,11 @@ pub fn FolderManager() -> Element {
                     }
 
                     // ListenBrainz credentials
-                    div { class: "p-3 bg-beet-dark rounded border border-white/10",
+                    div { class: "p-3 bg-white/[0.04] rounded-md",
                         div {
                             p { class: "text-sm text-white font-medium mb-1", "ListenBrainz Username" }
                             input {
-                                class: "w-full p-2 rounded bg-beet-panel border border-white/10 focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
                                 value: "{lb_username}",
                                 oninput: move |e| lb_username.set(e.value()),
                                 onchange: move |_| async move {
@@ -584,11 +584,11 @@ pub fn FolderManager() -> Element {
                         }
                         div { class: "mt-3",
                             p { class: "text-sm text-white font-medium mb-1", "ListenBrainz Token" }
-                            p { class: "text-xs text-gray-500 font-mono mb-2",
+                            p { class: "text-xs text-muted/80 font-mono mb-2",
                                 "Configure scrobbling in your Navidrome personal settings."
                             }
                             input {
-                                class: "w-full p-2 rounded bg-beet-panel border border-white/10 focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
+                                class: "w-full p-2 rounded bg-beet-panel focus:border-beet-accent focus:outline-none text-white font-mono text-sm",
                                 value: "{lb_token}",
                                 oninput: move |e| lb_token.set(e.value()),
                                 onchange: move |_| async move {
@@ -602,23 +602,23 @@ pub fn FolderManager() -> Element {
                                 "type": "password",
                             }
                         }
-                        p { class: "text-xs text-gray-500 font-mono mt-3",
+                        p { class: "text-xs text-muted/80 font-mono mt-3",
                             "Set up scrobbling in your Navidrome personal settings to feed the recommendation engine."
                         }
                     }
 
                     // Auto-delete toggle
-                    div { class: "flex items-center justify-between p-3 bg-beet-dark rounded border border-white/10",
+                    div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                         div {
                             p { class: "text-sm text-white font-medium", "Auto-delete 1-star tracks" }
-                            p { class: "text-xs text-gray-500 font-mono mt-0.5",
+                            p { class: "text-xs text-muted/80 font-mono mt-0.5",
                                 "Automatically delete files rated 1 star in Navidrome during sync"
                             }
                         }
                         button {
                             class: format!(
                                 "relative w-11 h-6 rounded-full cursor-pointer transition-colors {}",
-                                if auto_delete_enabled() { "bg-red-500" } else { "bg-gray-600" }
+                                if auto_delete_enabled() { "bg-red-500" } else { "bg-white/20" }
                             ),
                             onclick: move |_| async move {
                                 let new_val = !auto_delete_enabled();
@@ -639,15 +639,15 @@ pub fn FolderManager() -> Element {
                     }
 
                     // Discovery promote threshold
-                    div { class: "flex items-center justify-between p-3 bg-beet-dark rounded border border-white/10",
+                    div { class: "flex items-center justify-between p-3 bg-white/[0.04] rounded-md",
                         div {
                             p { class: "text-sm text-white font-medium", "Discovery promote threshold" }
-                            p { class: "text-xs text-gray-500 font-mono mt-0.5",
+                            p { class: "text-xs text-muted/80 font-mono mt-0.5",
                                 "Promote discovery tracks to your library when rated at or above this"
                             }
                         }
                         input {
-                            class: "w-16 p-2 rounded bg-beet-panel border border-white/10 text-white font-mono text-sm text-center",
+                            class: "w-16 p-2 rounded bg-beet-panel text-white font-mono text-sm text-center",
                             value: "{discovery_promote_threshold}",
                             oninput: move |e| discovery_promote_threshold.set(e.value()),
                             onchange: move |_| async move {

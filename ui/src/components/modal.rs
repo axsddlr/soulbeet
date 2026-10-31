@@ -15,7 +15,7 @@ pub fn Modal(props: Props) -> Element {
     rsx! {
       // Backdrop
       div {
-        class: "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity",
+        class: "fixed inset-0 bg-black/70 z-40 transition-opacity",
         onclick: move |_| props.on_close.call(()),
       }
 
@@ -26,13 +26,13 @@ pub fn Modal(props: Props) -> Element {
 
         // Content
         div {
-          class: "bg-beet-panel border border-white/10 max-h-[85vh] overflow-hidden flex flex-col rounded-lg shadow-2xl max-w-lg w-full pointer-events-auto transform transition-all",
+          class: "bg-beet-dim max-h-[85vh] overflow-hidden flex flex-col rounded-xl shadow-2xl shadow-black max-w-lg w-full pointer-events-auto transform transition-all",
           onclick: move |event| event.stop_propagation(),
           // Header Container
-          div { class: "flex items-center justify-between p-4 border-b border-white/10 bg-black/20",
+          div { class: "flex items-center justify-between px-5 pt-5 pb-3",
             div { class: "flex-1 min-w-0", {props.header} }
             button {
-              class: "text-gray-400 hover:text-white transition-colors ml-4 cursor-pointer",
+              class: "p-1 rounded-full text-muted hover:text-white hover:bg-white/10 transition-colors ml-4 cursor-pointer",
               onclick: move |_| props.on_close.call(()),
               // Close icon SVG
               svg {
@@ -50,7 +50,7 @@ pub fn Modal(props: Props) -> Element {
             }
           }
           // Scrollable Body
-          div { class: "overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-beet-accent/50 scrollbar-track-transparent",
+          div { class: "overflow-y-auto px-5 pb-5 pt-1",
             {props.children}
           }
         }

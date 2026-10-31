@@ -33,22 +33,20 @@ pub fn Login(props: Props) -> Element {
     };
 
     rsx! {
-      div { class: "flex flex-col items-center justify-center min-h-screen text-white font-display",
+      div { class: "flex flex-col items-center justify-center min-h-screen text-white bg-gradient-to-b from-beet-dim to-black px-4",
         // bg decorations
-        div { class: "fixed top-1/4 -left-10 w-64 h-64 bg-beet-accent/10 rounded-full blur-[150px] pointer-events-none" }
-        div { class: "fixed bottom-1/4 -right-10 w-64 h-64 bg-beet-leaf/10 rounded-full blur-[150px] pointer-events-none" }
 
-        div { class: "p-8 bg-beet-panel border border-white/10 rounded-lg shadow-2xl w-full max-w-md relative z-10",
+        div { class: "p-8 md:p-12 bg-beet-dark rounded-xl shadow-2xl shadow-black w-full max-w-md relative z-10",
           // Header
           div { class: "flex flex-col items-center mb-8",
             Logo {
               size: 64,
-              class: "mb-4 drop-shadow-[0_0_14px_rgba(255,0,255,0.5)] hover:-translate-y-1 transition-transform",
+              class: "mb-4",
             }
-            h1 { class: "text-2xl font-bold tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400",
+            h1 { class: "text-3xl font-extrabold tracking-tight text-white",
               "Soulbeet"
             }
-            p { class: "text-sm text-beet-leaf font-mono mt-2 tracking-widest",
+            p { class: "text-xs text-muted font-semibold mt-2 tracking-widest",
               "YOUR LIBRARY MANAGER"
             }
           }
@@ -61,7 +59,7 @@ pub fn Login(props: Props) -> Element {
                 handle_login();
             },
             div {
-              label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+              label { class: "block text-sm font-bold text-white mb-2",
                 "Username"
               }
               TextInput {
@@ -72,7 +70,7 @@ pub fn Login(props: Props) -> Element {
               }
             }
             div {
-              label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+              label { class: "block text-sm font-bold text-white mb-2",
                 "Password"
               }
               TextInput {
@@ -85,7 +83,7 @@ pub fn Login(props: Props) -> Element {
             }
 
             if !error().is_empty() {
-              div { class: "p-3 bg-red-500/10 border border-red-500/50 rounded text-red-400 text-sm font-mono flex items-center gap-2",
+              div { class: "p-3 bg-red-600 rounded-md text-white text-sm flex items-center gap-2",
                 svg {
                   class: "w-4 h-4",
                   fill: "none",
@@ -103,7 +101,7 @@ pub fn Login(props: Props) -> Element {
             }
 
             button {
-              class: "w-full retro-btn flex justify-center items-center gap-2 group",
+              class: "w-full retro-btn py-3.5 text-sm flex justify-center items-center gap-2 group",
               "type": "submit",
               span { "AUTHENTICATE" }
               svg {

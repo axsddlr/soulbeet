@@ -27,7 +27,7 @@ pub fn InlineTrackPanel(props: Props) -> Element {
 
     rsx! {
         div {
-            class: "border-t border-white/10 bg-beet-dark/50 p-4",
+            class: "px-2 md:px-4 pb-4",
 
             match &props.tracks {
                 None => rsx! {
@@ -46,14 +46,31 @@ pub fn InlineTrackPanel(props: Props) -> Element {
                 },
                 Some(tracks) if tracks.is_empty() => rsx! {
                     p {
-                        class: "text-sm text-gray-500 font-mono text-center py-4",
+                        class: "text-sm text-muted text-center py-4",
                         "No tracks found for this album."
                     }
                 },
                 Some(tracks) => {
                     rsx! {
                         div {
-                            class: "max-h-[400px] overflow-y-auto space-y-0.5",
+                            class: "max-h-[480px] overflow-y-auto",
+                            div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)_auto_2.25rem] items-center gap-3 md:gap-4 px-2 pb-2 mb-2 border-b border-white/10 text-xs font-medium uppercase tracking-wider text-muted",
+                                span { class: "text-right", "#" }
+                                span { "Title" }
+                                svg {
+                                    class: "w-4 h-4",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    view_box: "0 0 24 24",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
+                                    }
+                                }
+                                span {}
+                            }
                             for (idx, track) in tracks.iter().enumerate() {
                                 {
                                     let dl_state = if !has_folders {

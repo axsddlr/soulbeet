@@ -21,14 +21,14 @@ fn badge(state: &DownloadState) -> Badge {
     let (title, border, class, text) = match state {
         DownloadState::Queued => (
             "Queued".to_string(),
-            "border-white/5 opacity-60",
-            "border border-gray-600 text-gray-400",
+            "border-transparent opacity-60",
+            "border border-white/20 text-muted",
             "QUEUED",
         ),
         DownloadState::InProgress => (
             "Downloading".to_string(),
-            "border-beet-accent/50",
-            "bg-blue-500/20 text-blue-300",
+            "border-beet-accent/40",
+            "bg-beet-accent/20 text-beet-leaf",
             "SLSK",
         ),
         DownloadState::Completed => (
@@ -177,7 +177,7 @@ pub fn DownloadItem(
     };
 
     rsx! {
-      div { class: "bg-white/5 border {border_class} p-4 rounded-lg hover:border-beet-accent/50 transition-colors group",
+      div { class: "bg-white/[0.04] border {border_class} p-4 rounded-md hover:bg-white/[0.08] transition-colors group",
         div { class: "flex justify-between items-start mb-2",
           div {
             class: "text-sm font-bold text-white truncate w-3/4 pr-2",
@@ -194,7 +194,7 @@ pub fn DownloadItem(
               { let file_clone = file.clone();
               rsx! {
                 button {
-                  class: "text-[10px] font-mono px-1.5 py-0.5 rounded uppercase border border-transparent text-gray-600 opacity-0 group-hover:opacity-100 hover:border-red-500/40 hover:text-red-400 transition-all cursor-pointer",
+                  class: "text-[10px] font-mono px-1.5 py-0.5 rounded uppercase border border-transparent text-muted opacity-0 group-hover:opacity-100 hover:border-red-500/40 hover:text-red-400 transition-all cursor-pointer",
                   title: "Cancel download",
                   onclick: move |evt: Event<MouseData>| {
                       evt.stop_propagation();
@@ -206,7 +206,7 @@ pub fn DownloadItem(
             }
           }
         }
-        div { class: "flex justify-between text-xs text-gray-400 font-mono mb-1",
+        div { class: "flex justify-between text-xs text-muted font-mono mb-1",
           span {
             if matches!(state, DownloadState::InProgress) && file.speed > 0.0 {
               "{format_size(file.speed as u64)}/s"
@@ -218,33 +218,28 @@ pub fn DownloadItem(
         }
         // Progress Bar
         if matches!(state, DownloadState::InProgress | DownloadState::Importing) {
-          div { class: "h-2 w-full bg-gray-800 rounded-full overflow-hidden relative",
+          div { class: "h-1 w-full bg-white/10 rounded-full overflow-hidden relative",
             div {
-              class: "h-full bg-beet-accent absolute top-0 left-0 transition-all duration-300",
+              class: "h-full bg-beet-accent rounded-full absolute top-0 left-0 transition-all duration-300",
               style: "width: {percent}%",
-            }
-            // Striped animation overlay (using inline SVG for pattern)
-            div {
-              class: "h-full w-full absolute top-0 left-0 opacity-30",
-              style: "background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.5) 5px, rgba(255,255,255,0.5) 10px);",
             }
           }
         } else if matches!(state, DownloadState::Queued) {
-          div { class: "h-1 w-full bg-gray-800 rounded-full mt-2" }
+          div { class: "h-1 w-full bg-white/10 rounded-full mt-2" }
         }
         if let DownloadState::ImportQueued(n) = state {
-          div { class: "text-xs text-gray-300 font-mono mt-2", "{waiting_text(*n)}" }
+          div { class: "text-xs text-muted mt-2", "{waiting_text(*n)}" }
         }
         // The only element holding the reason: e2e matches it by text.
         if let Some((note_class, note)) = note {
           div { class: "text-xs {note_class} mt-1 break-words", "{note}" }
         }
         if let (true, Some(kept)) = (file.retryable, &file.local_path) {
-          div { class: "text-xs text-gray-500 font-mono mt-1 break-all", "Kept in {kept}" }
+          div { class: "text-xs text-muted/80 font-mono mt-1 break-all", "Kept in {kept}" }
         }
         if let (Some(_), Some(tail)) = (note, &file.import_output) {
           Disclosure { class: "mt-2", label: "beets output",
-            pre { class: "mt-1 max-h-48 overflow-y-auto text-xs font-mono text-gray-400 whitespace-pre-wrap break-all", "{tail}" }
+            pre { class: "mt-1 max-h-48 overflow-y-auto text-xs font-mono text-muted bg-black/30 rounded p-2 whitespace-pre-wrap break-all", "{tail}" }
           }
         }
         if shows_retry(&file) {
@@ -265,7 +260,7 @@ pub fn DownloadItem(
           }
         }
         if matches!(state, DownloadState::Importing) {
-          div { class: "flex items-center gap-2 text-xs text-gray-300 font-mono mt-2",
+          div { class: "flex items-center gap-2 text-xs text-muted mt-2",
             svg {
               class: "w-3 h-3 animate-spin",
               fill: "none",

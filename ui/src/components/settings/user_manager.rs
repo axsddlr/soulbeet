@@ -102,8 +102,8 @@ pub fn UserManager() -> Element {
     };
 
     rsx! {
-      div { class: "bg-beet-panel border border-white/10 p-6 rounded-lg shadow-2xl relative z-10",
-        h2 { class: "text-xl font-bold mb-4 text-beet-accent font-display",
+      div { class: "bg-beet-panel p-6 rounded-lg relative z-10",
+        h2 { class: "text-2xl font-bold mb-4 text-white tracking-tight",
           "User Management"
         }
 
@@ -122,7 +122,7 @@ pub fn UserManager() -> Element {
         // Create User
         div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-4",
           div {
-            label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
               "New Username"
             }
             TextInput {
@@ -132,7 +132,7 @@ pub fn UserManager() -> Element {
             }
           }
           div {
-            label { class: "block text-xs font-mono text-gray-400 mb-1 uppercase tracking-wider",
+            label { class: "block text-xs font-mono text-muted mb-1 uppercase tracking-wider",
               "New Password"
             }
             TextInput {
@@ -144,17 +144,17 @@ pub fn UserManager() -> Element {
           }
         }
         button {
-          class: "retro-btn mb-6 rounded",
+          class: "retro-btn mb-6",
           onclick: handle_create_user,
           "Create User"
         }
 
         // User List
-        h3 { class: "text-lg font-bold mb-2 text-white font-display border-b border-white/10 pb-2",
+        h3 { class: "text-lg font-bold mb-2 text-white border-b border-white/10 pb-2",
           "Existing Users"
         }
         if users.read().is_empty() {
-          p { class: "text-gray-500 font-mono italic", "No users found." }
+          p { class: "text-muted/80 font-mono italic", "No users found." }
         } else {
           ul { class: "space-y-2",
             {
@@ -172,7 +172,7 @@ pub fn UserManager() -> Element {
                           li { class: "bg-white/5 border border-white/5 p-3 rounded hover:border-beet-accent/30 transition-colors",
                             if editing_user_id() == Some(user.id.clone()) {
                               div { class: "flex flex-col gap-2",
-                                div { class: "font-bold text-white font-display", "{user.username}" }
+                                div { class: "font-bold text-white", "{user.username}" }
                                 if edit_mode() == EditMode::Password {
                                   TextInput {
                                     look: FieldLook::Compact,
@@ -188,7 +188,7 @@ pub fn UserManager() -> Element {
                                       "[ Save ]"
                                     }
                                     button {
-                                      class: "text-xs uppercase tracking-wider font-bold text-gray-500 hover:text-white transition-colors cursor-pointer",
+                                      class: "text-xs uppercase tracking-wider font-bold text-muted/80 hover:text-white transition-colors cursor-pointer",
                                       onclick: move |_| editing_user_id.set(None),
                                       "[ Cancel ]"
                                     }
@@ -207,7 +207,7 @@ pub fn UserManager() -> Element {
                                       "[ Save ]"
                                     }
                                     button {
-                                      class: "text-xs uppercase tracking-wider font-bold text-gray-500 hover:text-white transition-colors cursor-pointer",
+                                      class: "text-xs uppercase tracking-wider font-bold text-muted/80 hover:text-white transition-colors cursor-pointer",
                                       onclick: move |_| editing_user_id.set(None),
                                       "[ Cancel ]"
                                     }
@@ -216,10 +216,10 @@ pub fn UserManager() -> Element {
                               }
                             } else {
                               div { class: "flex justify-between items-center flex-wrap gap-2",
-                                span { class: "font-bold text-white font-display", "{user.username}" }
+                                span { class: "font-bold text-white", "{user.username}" }
                                 div { class: "flex gap-3",
                                   button {
-                                    class: "text-xs font-mono text-gray-400 hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| {
                                         editing_user_id.set(Some(id_edit_un.clone()));
                                         edit_mode.set(EditMode::Username);
@@ -228,7 +228,7 @@ pub fn UserManager() -> Element {
                                     "Rename"
                                   }
                                   button {
-                                    class: "text-xs font-mono text-gray-400 hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs font-mono text-muted hover:text-beet-accent transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| {
                                         editing_user_id.set(Some(id_edit_pw.clone()));
                                         edit_mode.set(EditMode::Password);
@@ -237,7 +237,7 @@ pub fn UserManager() -> Element {
                                     "Password"
                                   }
                                   button {
-                                    class: "text-xs font-mono text-gray-400 hover:text-red-400 transition-colors underline decoration-dotted cursor-pointer",
+                                    class: "text-xs font-mono text-muted hover:text-red-400 transition-colors underline decoration-dotted cursor-pointer",
                                     onclick: move |_| handle_delete_user(id_delete.clone()),
                                     "Delete"
                                   }

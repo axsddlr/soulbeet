@@ -7,17 +7,15 @@ pub fn DashboardPage() -> Element {
     let mut active_tab = use_signal(DashboardTab::default);
 
     rsx! {
-        div { class: "fixed top-1/4 -left-10 w-64 h-64 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" }
-        div { class: "fixed bottom-1/4 -right-10 w-64 h-64 bg-beet-leaf/10 rounded-full blur-[100px] pointer-events-none" }
 
-        div { class: "space-y-6 text-white w-full max-w-5xl z-10 mx-auto",
-            div { class: "text-center mb-6",
-                h1 { class: "text-4xl font-bold text-beet-accent mb-2 font-display",
+        div { class: "space-y-6 text-white w-full max-w-6xl mt-2 md:mt-6",
+            div { class: "mb-2",
+                h1 { class: "text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-2",
                     "Dashboard"
                 }
             }
 
-            div { class: "flex justify-center",
+            div { class: "flex",
                 DashboardTabs {
                     active: active_tab(),
                     on_change: move |tab| active_tab.set(tab),
@@ -46,12 +44,12 @@ fn OverviewTab() -> Element {
             rsx! { StatsOverview { stats: s } }
         }
         Some(Err(_)) => rsx! {
-            div { class: "text-center text-gray-500 font-mono",
+            div { class: "text-center text-muted",
                 "Failed to load library stats. Is Navidrome configured?"
             }
         },
         None => rsx! {
-            div { class: "text-center text-gray-400 font-mono animate-pulse",
+            div { class: "text-center text-muted animate-pulse",
                 "Loading stats..."
             }
         },

@@ -481,7 +481,7 @@ fn NavidromeBanner() -> Element {
     rsx! {
         StatusBanner { dot_class: dot_color, label, message: message.to_string(),
             button {
-                class: "shrink-0 text-gray-600 hover:text-gray-300 transition-colors cursor-pointer p-2 -mr-1",
+                class: "shrink-0 text-muted/60 hover:text-white/80 transition-colors cursor-pointer p-2 -mr-1",
                 onclick: dismiss,
                 svg {
                     class: "w-3.5 h-3.5",
