@@ -14,8 +14,29 @@ const ROW_MARKER: &str = "@@sb@@";
 const FIELD_SEP: &str = "|||";
 const LS_FORMAT: &str = "@@sb@@$path|||$artist|||$title|||$album|||$albumartist";
 
+/// Optional directory that holds every library db instead of the music
+/// folders, since SQLite locking is unreliable on SMB/NFS shares.
+const LIBRARY_DIR_ENV: &str = "BEETS_LIBRARY_DIR";
+
 pub(crate) fn library_db(root: &Path) -> std::path::PathBuf {
+    let dir = std::env::var_os(LIBRARY_DIR_ENV)
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from);
+    let db = library_db_in(root, dir.as_deref());
+    if dir.is_some() {
+        prepare_db(root, &db);
+    }
+    db
+}
+
+pub(crate) fn library_db_in(root: &Path, _dir: Option<&Path>) -> std::path::PathBuf {
     root.join(".beets_library.db")
+}
+
+fn prepare_db(_root: &Path, _db: &Path) {}
+
+pub(crate) fn migrate_legacy_db(_legacy: &Path, _new: &Path) -> bool {
+    false
 }
 
 fn parse_row(row: &str, library: &str) -> Option<LibraryTrack> {
@@ -148,4 +169,93 @@ pub(crate) async fn find_duplicates_across_libraries(
         total_duplicate_tracks,
         libraries_scanned,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unset_dir_gives_the_legacy_path() {
+        assert_eq!(
+            library_db_in(Path::new("/music/a"), None),
+            Path::new("/music/a/.beets_library.db")
+        );
+    }
+
+    #[test]
+    fn set_dir_puts_the_db_under_it() {
+        let db = library_db_in(Path::new("/music/a"), Some(Path::new("/data/beets")));
+        assert_eq!(db.parent(), Some(Path::new("/data/beets")));
+        assert!(db.extension().is_some_and(|e| e == "db"));
+        assert!(db.file_name().unwrap().to_string_lossy().starts_with("a-"));
+    }
+
+    #[test]
+    fn different_folders_get_different_names() {
+        let d = Some(Path::new("/data/beets"));
+        // Same last component, different parents.
+        assert_ne!(
+            library_db_in(Path::new("/music/a/Music"), d),
+            library_db_in(Path::new("/music/b/Music"), d)
+        );
+    }
+
+    #[test]
+    fn the_same_folder_gets_the_same_name() {
+        let d = Some(Path::new("/data/beets"));
+        assert_eq!(
+            library_db_in(Path::new("/music/a"), d),
+            library_db_in(Path::new("/music/a"), d)
+        );
+        // Pinned so an algorithm change cannot silently orphan existing dbs.
+        assert_eq!(
+            library_db_in(Path::new("/music/a"), d),
+            Path::new("/data/beets/a-2b2c3a5a9a6b8ab0.db")
+        );
+    }
+
+    #[test]
+    fn weird_characters_are_sanitized() {
+        let db = library_db_in(Path::new("/music/My M{fc}sic: \"x\"?*"), Some(Path::new("/d")));
+        let name = db.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
+            "{name}"
+        );
+        assert_eq!(db.parent(), Some(Path::new("/d")));
+        let root = library_db_in(Path::new("/"), Some(Path::new("/d")));
+        assert!(root.file_name().unwrap().to_string_lossy().ends_with(".db"));
+    }
+
+    #[test]
+    fn migration_copies_the_legacy_db_and_keeps_it() {
+        let t = tempfile::tempdir().unwrap();
+        let legacy = t.path().join("legacy.db");
+        let new = t.path().join("new.db");
+        std::fs::write(&legacy, b"old").unwrap();
+        assert!(migrate_legacy_db(&legacy, &new));
+        assert_eq!(std::fs::read(&new).unwrap(), b"old");
+        assert!(legacy.exists());
+    }
+
+    #[test]
+    fn migration_never_overwrites_an_existing_db() {
+        let t = tempfile::tempdir().unwrap();
+        let legacy = t.path().join("legacy.db");
+        let new = t.path().join("new.db");
+        std::fs::write(&legacy, b"old").unwrap();
+        std::fs::write(&new, b"mine").unwrap();
+        assert!(!migrate_legacy_db(&legacy, &new));
+        assert_eq!(std::fs::read(&new).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn migration_without_a_legacy_db_does_nothing() {
+        let t = tempfile::tempdir().unwrap();
+        let new = t.path().join("new.db");
+        assert!(!migrate_legacy_db(&t.path().join("none.db"), &new));
+        assert!(!new.exists());
+    }
 }
