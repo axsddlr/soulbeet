@@ -2548,12 +2548,13 @@ mod tests {
         m.track_states[0].progress_at = ago(STALL_TIMEOUT + Duration::from_secs(1));
         m.track_states[0].transferred = 4096;
 
-        poll_tracks(
-            &mut m,
-            &[listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)],
-            &backend,
-        )
-        .await;
+        // The listing reports the same 4096 bytes, so the transfer is stalled
+        // rather than moving, and the slot fails over.
+        let stalled = DownloadProgress {
+            transferred: 4096,
+            ..listed("peer_a", "dirA/aaa.flac", DownloadState::InProgress)
+        };
+        poll_tracks(&mut m, &[stalled], &backend).await;
 
         assert_eq!(m.tracked_files[0].source, "peer_b");
         assert!(m.track_states[0].progress_at.elapsed() < STALL_TIMEOUT);
