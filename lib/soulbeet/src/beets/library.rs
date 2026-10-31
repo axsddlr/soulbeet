@@ -29,14 +29,63 @@ pub(crate) fn library_db(root: &Path) -> std::path::PathBuf {
     db
 }
 
-pub(crate) fn library_db_in(root: &Path, _dir: Option<&Path>) -> std::path::PathBuf {
-    root.join(".beets_library.db")
+/// The library db for `root`: `<root>/.beets_library.db`, or with `dir` set a
+/// file in `dir` named after `root` (sanitized last component plus a stable
+/// hash of the full path, so two folders never share a db).
+pub(crate) fn library_db_in(root: &Path, dir: Option<&Path>) -> std::path::PathBuf {
+    let Some(dir) = dir else {
+        return root.join(".beets_library.db");
+    };
+    // FNV-1a 64: stable across processes and releases, unlike DefaultHasher.
+    let hash = root
+        .to_string_lossy()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        });
+    let name: String = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let name = if name.is_empty() { "root" } else { &name };
+    dir.join(format!("{name}-{hash:016x}.db"))
 }
 
-fn prepare_db(_root: &Path, _db: &Path) {}
+/// Creates the db's directory and copies the legacy db over once.
+fn prepare_db(root: &Path, db: &Path) {
+    if let Some(parent) = db.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            warn!("Could not create {:?}: {e}", parent);
+        }
+    }
+    migrate_legacy_db(&root.join(".beets_library.db"), db);
+}
 
-pub(crate) fn migrate_legacy_db(_legacy: &Path, _new: &Path) -> bool {
-    false
+/// Copies `legacy` to `new` when only the legacy file exists. Copies rather
+/// than moves so a rollback still finds it, and never overwrites `new`.
+pub(crate) fn migrate_legacy_db(legacy: &Path, new: &Path) -> bool {
+    if new.exists() || !legacy.is_file() {
+        return false;
+    }
+    match std::fs::copy(legacy, new) {
+        Ok(_) => {
+            info!("Copied beets library {:?} to {:?}", legacy, new);
+            true
+        }
+        Err(e) => {
+            warn!("Could not copy beets library {:?} to {:?}: {e}", legacy, new);
+            false
+        }
+    }
 }
 
 fn parse_row(row: &str, library: &str) -> Option<LibraryTrack> {
@@ -211,13 +260,13 @@ mod tests {
         // Pinned so an algorithm change cannot silently orphan existing dbs.
         assert_eq!(
             library_db_in(Path::new("/music/a"), d),
-            Path::new("/data/beets/a-2b2c3a5a9a6b8ab0.db")
+            Path::new("/data/beets/a-8cae68d89bf919ed.db")
         );
     }
 
     #[test]
     fn weird_characters_are_sanitized() {
-        let db = library_db_in(Path::new("/music/My M{fc}sic: \"x\"?*"), Some(Path::new("/d")));
+        let db = library_db_in(Path::new("/music/My M\u{fc}sic: \"x\"?*"), Some(Path::new("/d")));
         let name = db.file_name().unwrap().to_string_lossy().into_owned();
         assert!(
             name.chars()
