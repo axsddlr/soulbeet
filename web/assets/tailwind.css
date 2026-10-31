@@ -370,6 +370,9 @@
       max-width: 96rem;
     }
   }
+  .mx-0 {
+    margin-inline: 0px;
+  }
   .mx-2 {
     margin-inline: calc(var(--spacing) * 2);
   }
@@ -1741,6 +1744,9 @@
   }
   .opacity-75 {
     opacity: 75%;
+  }
+  .opacity-80\! {
+    opacity: 80% !important;
   }
   .opacity-100 {
     opacity: 100%;

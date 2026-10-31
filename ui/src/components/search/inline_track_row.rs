@@ -41,7 +41,7 @@ pub fn InlineTrackRow(props: Props) -> Element {
 
             // Duration (conditional)
             span {
-                class: "text-sm text-muted tabular-nums",
+                class: "w-14 text-right shrink-0 text-sm text-muted tabular-nums",
                 if let Some(duration) = &track.duration {
                     "{duration}"
                 }

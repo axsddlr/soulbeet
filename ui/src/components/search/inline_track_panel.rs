@@ -57,16 +57,18 @@ pub fn InlineTrackPanel(props: Props) -> Element {
                             div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)_auto_2.25rem] items-center gap-3 md:gap-4 px-2 pb-2 mb-2 border-b border-white/10 text-xs font-medium uppercase tracking-wider text-muted",
                                 span { class: "text-right", "#" }
                                 span { "Title" }
-                                svg {
-                                    class: "w-4 h-4",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    view_box: "0 0 24 24",
-                                    path {
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
+                                span { class: "w-14 shrink-0 flex justify-end",
+                                    svg {
+                                        class: "w-4 h-4",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        view_box: "0 0 24 24",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
+                                        }
                                     }
                                 }
                                 span {}

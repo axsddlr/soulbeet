@@ -275,7 +275,7 @@ fn WebNavbar() -> Element {
                     span { class: "relative",
                         IconDownloads { class: "w-6 h-6" }
                         if has_downloads {
-                            DownloadsDot {}
+                            span { class: "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-beet-accent" }
                         }
                     }
                     span { "Downloads" }
