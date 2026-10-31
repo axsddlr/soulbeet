@@ -340,11 +340,96 @@ fn artist_confirmed(artist: &str, candidate: &DownloadableItem) -> bool {
     contains_words(&path, artist) || contains_words(&path, bare)
 }
 
+/// The name of the file at remote `path`, without its folders and
+/// extension. Soulseek paths are Windows-style, so both `\` and `/`
+/// separate folders. A last dot counts as an extension's only when a short
+/// alphanumeric run follows it, so "Mr. Brightside" keeps its words.
+fn file_stem(path: &str) -> &str {
+    let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
+    match name.rsplit_once('.') {
+        Some((stem, ext))
+            if !stem.trim().is_empty()
+                && (1..=5).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            stem
+        }
+        _ => name,
+    }
+}
+
+/// Whether two normalized names are the same name: equal, or the same
+/// significant words ("The Beatles" and "Beatles, The"). Stricter than
+/// `artists_match`, since a title segment that merely holds the artist's
+/// name is still a title.
+fn same_name(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let words = significant_words(a);
+    a == b || (!words.is_empty() && words == significant_words(b))
+}
+
+/// The `title_key` of `candidate`'s own file name, for comparing with the
+/// wanted track's. slskd labels a result with the expected title it matched
+/// best, not the file's, so a one-track search labels every file with the
+/// wanted title and only the file name tells the songs apart.
+///
+/// The stem loses leading " - " segments that are a track number, the
+/// artist (`track`'s, or the candidate's when the track has none) or the
+/// album (either's), so "Artist - Title", "NN - Artist - Title", "Artist -
+/// NN - Title" and "Artist - Album - NN - Title" all leave the title; the
+/// last segment always stays. Underscores read as spaces. A stem without a
+/// letter ("07") cannot say which song it is and keys to nothing, and an
+/// empty key matches nothing.
+fn file_title_key(track: &DownloadableItem, candidate: &DownloadableItem) -> String {
+    let stem = file_stem(&candidate.id)
+        .replace('_', " ")
+        .replace(['\u{2013}', '\u{2014}'], "-");
+    if !stem.chars().any(char::is_alphabetic) {
+        return String::new();
+    }
+    let artist = if track.artist.trim().is_empty() {
+        normalize_artist(&candidate.artist)
+    } else {
+        normalize_artist(&track.artist)
+    };
+    let albums = [
+        normalize_artist(&track.album),
+        normalize_artist(&candidate.album),
+    ];
+    let segments: Vec<&str> = stem.split(" - ").collect();
+    let mut start = 0;
+    while start + 1 < segments.len() {
+        let segment = segments[start].trim();
+        let number = segment.trim_end_matches(['.', ')']);
+        let is_track_number =
+            (1..=3).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());
+        let name = normalize_artist(strip_track_number(segment));
+        let is_name =
+            same_name(&artist, &name) || albums.iter().any(|album| same_name(album, &name));
+        if !(is_track_number || is_name) {
+            break;
+        }
+        start += 1;
+    }
+    title_key(&segments[start..].join(" - "))
+}
+
+/// Whether `candidate`'s file is the recording `wanted`, `track`'s
+/// non-empty `title_key`: its `file_title_key` is the same. Any word the
+/// file name has beyond the wanted title's, once `title_key` has dropped
+/// what it drops, names another recording ("Song Live", "Song Remix") or
+/// another song, so the keys must be equal.
+fn file_names_track(track: &DownloadableItem, candidate: &DownloadableItem, wanted: &str) -> bool {
+    !wanted.is_empty() && file_title_key(track, candidate) == wanted
+}
+
 /// The items of a re-search that can stand in for `track`, best group
-/// first: the same non-empty title key, the same artist when the track has
-/// one (`artist_confirmed`), a close duration, and a source not `tried`.
-/// When the track's duration is known, candidates of unknown duration come
-/// after the ones known to match.
+/// first: a file named for the same title (`file_names_track`), the same
+/// artist when the track has one (`artist_confirmed`), a close duration,
+/// and a source not `tried`. When the track's duration is known, candidates
+/// of unknown duration come after the ones known to match.
 fn usable_candidates(
     track: &DownloadableItem,
     mut groups: Vec<DownloadableGroup>,
@@ -363,7 +448,7 @@ fn usable_candidates(
     let mut found: Vec<DownloadableItem> = Vec::new();
     for candidate in groups.into_iter().flat_map(|group| group.items) {
         let seen = |source: &str, id: &str| source == candidate.source && id == candidate.id;
-        if title_key(&candidate.title) == wanted
+        if file_names_track(track, &candidate, &wanted)
             && (artist.is_empty() || artist_confirmed(&artist, &candidate))
             && duration_matches(track.duration, candidate.duration)
             && !tried.iter().any(|(source, id)| seen(source, id))
@@ -565,9 +650,10 @@ impl SourcePool {
     /// and that slot simply gets no alternates.
     ///
     /// `rest` must already be in descending score order, which is how
-    /// `auto_download` sorts it. Matching is by `title_key`, never by
-    /// filename: the same track has a completely different remote path on
-    /// each peer.
+    /// `auto_download` sorts it. Matching is by the file's own name
+    /// (`file_names_track`), never by its whole path: the same track has a
+    /// completely different remote path on each peer, and the item's title
+    /// is only the expected title slskd matched it to.
     pub fn from_tracks(tracks: &[Option<DownloadableItem>], rest: &[DownloadableGroup]) -> Self {
         let slots = tracks
             .iter()
@@ -577,7 +663,7 @@ impl SourcePool {
                         let wanted = title_key(&track.title);
                         rest.iter()
                             .flat_map(|group| group.items.iter())
-                            .filter(|candidate| title_key(&candidate.title) == wanted)
+                            .filter(|candidate| file_names_track(track, candidate, &wanted))
                             .cloned()
                             .collect()
                     }
@@ -947,9 +1033,21 @@ mod tests {
     fn alternates_follow_the_order_of_the_remaining_groups() {
         let tracks = vec![Some(item("peer_a", "Wake Up", "a.flac"))];
         let rest = vec![
-            group("peer_b", vec![item("peer_b", "Wake Up", "b.flac")], 0.9),
-            group("peer_c", vec![item("peer_c", "Wake Up", "c.flac")], 0.8),
-            group("peer_d", vec![item("peer_d", "Wake Up", "d.flac")], 0.7),
+            group(
+                "peer_b",
+                vec![item("peer_b", "Wake Up", "b/Wake Up.flac")],
+                0.9,
+            ),
+            group(
+                "peer_c",
+                vec![item("peer_c", "Wake Up", "c/Wake Up.flac")],
+                0.8,
+            ),
+            group(
+                "peer_d",
+                vec![item("peer_d", "Wake Up", "d/Wake Up.flac")],
+                0.7,
+            ),
         ];
 
         let mut pool = SourcePool::from_tracks(&tracks, &rest);
@@ -1049,8 +1147,8 @@ mod tests {
         let rest = vec![group(
             "peer_b",
             vec![
-                item("peer_b", "Come Over", "b-come-over.flac"),
-                item("peer_b", "Wake Up", "b-wake-up.flac"),
+                item("peer_b", "Come Over", "b/Come Over.flac"),
+                item("peer_b", "Wake Up", "b/Wake Up.flac"),
             ],
             0.9,
         )];
@@ -1062,11 +1160,11 @@ mod tests {
         let mut pool = SourcePool::from_tracks(&tracks, &rest);
         assert_eq!(
             pool.take_next(0).map(|i| i.id),
-            Some("b-wake-up.flac".to_string())
+            Some("b/Wake Up.flac".to_string())
         );
         assert_eq!(
             pool.take_next(1).map(|i| i.id),
-            Some("b-come-over.flac".to_string())
+            Some("b/Come Over.flac".to_string())
         );
     }
 
@@ -1075,8 +1173,8 @@ mod tests {
         let rest = vec![group(
             "peer_b",
             vec![
-                item("peer_b", "Wake Up", "b-wake-up.flac"),
-                item("peer_b", "Come Over", "b-come-over.flac"),
+                item("peer_b", "Wake Up", "b/Wake Up.flac"),
+                item("peer_b", "Come Over", "b/Come Over.flac"),
             ],
             0.9,
         )];
@@ -1092,12 +1190,12 @@ mod tests {
         let mut pool = SourcePool::from_tracks(&tracks, &rest);
         assert_eq!(
             pool.take_next(0).map(|i| i.id),
-            Some("b-wake-up.flac".to_string())
+            Some("b/Wake Up.flac".to_string())
         );
         assert!(pool.take_next(1).is_none());
         assert_eq!(
             pool.take_next(2).map(|i| i.id),
-            Some("b-come-over.flac".to_string())
+            Some("b/Come Over.flac".to_string())
         );
     }
 
@@ -1375,14 +1473,21 @@ mod tests {
         let rest = vec![group(
             "peer_b",
             vec![
-                item("peer_b", "Wake Up (Live)", "b-live.flac"),
-                item("peer_b", "07 - Wake Up (feat. X)", "b.flac"),
+                item("peer_b", "Wake Up (Live)", "b/Wake Up (Live).flac"),
+                item(
+                    "peer_b",
+                    "07 - Wake Up (feat. X)",
+                    "b/07 - Wake Up (feat. X).flac",
+                ),
             ],
             0.9,
         )];
 
         let mut pool = SourcePool::from_tracks(&tracks, &rest);
-        assert_eq!(pool.take_next(0).map(|i| i.id), Some("b.flac".to_string()));
+        assert_eq!(
+            pool.take_next(0).map(|i| i.id),
+            Some("b/07 - Wake Up (feat. X).flac".to_string())
+        );
         assert!(
             pool.take_next(0).is_none(),
             "the live recording is no alternate"
@@ -1392,11 +1497,11 @@ mod tests {
     /// A pool for one "Wake Up" from peer_a whose static alternates come
     /// from `statics`, re-searching through `finder`.
     fn researching_pool(statics: &[&str], finder: &Arc<ScriptedFinder>) -> SourcePool {
-        let mut items = vec![item("peer_a", "Wake Up", "a.flac")];
+        let mut items = vec![item("peer_a", "Wake Up", "a/Wake Up.flac")];
         items.extend(
             statics
                 .iter()
-                .map(|peer| item(peer, "Wake Up", &format!("{peer}.flac"))),
+                .map(|peer| item(peer, "Wake Up", &format!("{peer}/Wake Up.flac"))),
         );
         SourcePool::single(items).with_finder(finder.clone())
     }
@@ -1405,7 +1510,7 @@ mod tests {
     async fn researches_once_the_static_alternates_run_out() {
         let finder = ScriptedFinder::new(vec![vec![group(
             "peer_z",
-            vec![item("peer_z", "Wake Up", "z.flac")],
+            vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
             0.9,
         )]]);
         let mut pool = researching_pool(&["peer_b"], &finder);
@@ -1425,10 +1530,10 @@ mod tests {
     async fn a_slot_without_static_alternates_researches() {
         let finder = ScriptedFinder::new(vec![vec![group(
             "peer_z",
-            vec![item("peer_z", "Wake Up", "z.flac")],
+            vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
             0.9,
         )]]);
-        let tracks = vec![Some(item("peer_a", "Wake Up", "a.flac"))];
+        let tracks = vec![Some(item("peer_a", "Wake Up", "a/Wake Up.flac"))];
         let mut pool = SourcePool::from_tracks(&tracks, &[]).with_finder(finder.clone());
         let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
 
@@ -1443,14 +1548,14 @@ mod tests {
             vec![group(
                 "peer_y",
                 vec![
-                    item("peer_y", "Come Over", "y-come-over.flac"),
-                    item("peer_y", "Wake Up (Live)", "y-live.flac"),
+                    item("peer_y", "Come Over", "y/Come Over.flac"),
+                    item("peer_y", "Wake Up (Live)", "y/Wake Up (Live).flac"),
                 ],
                 0.9,
             )],
             vec![group(
                 "peer_z",
-                vec![item("peer_z", "Wake Up", "z.flac")],
+                vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
                 0.9,
             )],
         ]);
@@ -1458,7 +1563,7 @@ mod tests {
         let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
 
         let queued = pool.enqueue_next(0, &backend, &batch("X")).await;
-        assert_eq!(queued.map(|q| q.id), Some("t-z.flac".to_string()));
+        assert_eq!(queued.map(|q| q.id), Some("t-z/Wake Up.flac".to_string()));
         assert_eq!(
             finder.queries(),
             vec!["Kowloon Wake Up".to_string(), "Wake Up".to_string()]
@@ -1469,7 +1574,7 @@ mod tests {
     async fn the_title_alone_is_not_searched_when_the_first_query_finds_one() {
         let finder = ScriptedFinder::new(vec![vec![group(
             "peer_z",
-            vec![item("peer_z", "Wake Up", "z.flac")],
+            vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
             0.9,
         )]]);
         let mut pool = researching_pool(&[], &finder);
@@ -1490,9 +1595,9 @@ mod tests {
         let finder = ScriptedFinder::new(vec![vec![group(
             "mixed",
             vec![
-                item("peer_a", "Wake Up", "a.flac"),
-                item("peer_b", "Wake Up", "peer_b.flac"),
-                item("peer_c", "Wake Up", "c.flac"),
+                item("peer_a", "Wake Up", "a/Wake Up.flac"),
+                item("peer_b", "Wake Up", "peer_b/Wake Up.flac"),
+                item("peer_c", "Wake Up", "c/Wake Up.flac"),
             ],
             0.9,
         )]]);
@@ -1511,7 +1616,7 @@ mod tests {
     async fn research_drops_candidates_whose_duration_is_off() {
         let timed = |peer: &str, secs: u32| DownloadableItem {
             duration: Some(secs),
-            ..item(peer, "Wake Up", &format!("{peer}.flac"))
+            ..item(peer, "Wake Up", &format!("{peer}/Wake Up.flac"))
         };
         // The original runs 200s, so 10s is the larger tolerance.
         let finder = ScriptedFinder::new(vec![vec![group(
@@ -1528,7 +1633,7 @@ mod tests {
         // A 600s original allows 5%, 30s.
         let original = DownloadableItem {
             duration: Some(600),
-            ..item("peer_a", "Wake Up", "a.flac")
+            ..item("peer_a", "Wake Up", "a/Wake Up.flac")
         };
         let finder = ScriptedFinder::new(vec![vec![group(
             "mixed",
@@ -1548,12 +1653,12 @@ mod tests {
         let finder = ScriptedFinder::new(vec![vec![
             group(
                 "peer_low",
-                vec![item("peer_low", "Wake Up", "low.flac")],
+                vec![item("peer_low", "Wake Up", "low/Wake Up.flac")],
                 0.4,
             ),
             group(
                 "peer_high",
-                vec![item("peer_high", "Wake Up", "high.flac")],
+                vec![item("peer_high", "Wake Up", "high/Wake Up.flac")],
                 0.9,
             ),
         ]]);
@@ -1569,7 +1674,13 @@ mod tests {
         let finder = ScriptedFinder::new(vec![vec![group(
             "many",
             (0..8)
-                .map(|i| item(&format!("peer_r{i}"), "Wake Up", &format!("r{i}.flac")))
+                .map(|i| {
+                    item(
+                        &format!("peer_r{i}"),
+                        "Wake Up",
+                        &format!("r{i}/Wake Up.flac"),
+                    )
+                })
                 .collect(),
             0.9,
         )]]);
@@ -1617,7 +1728,11 @@ mod tests {
     #[tokio::test]
     async fn research_sends_the_cleaned_title() {
         let finder = ScriptedFinder::new(vec![]);
-        let original = item("peer_a", "07 - Wake Up (feat. X) [2011 Remaster]", "a.flac");
+        let original = item(
+            "peer_a",
+            "07 - Wake Up (feat. X) [2011 Remaster]",
+            "a/Wake Up.flac",
+        );
         let mut pool = SourcePool::single(vec![original]).with_finder(finder.clone());
         let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![]);
 
@@ -1643,7 +1758,7 @@ mod tests {
             vec![],
             vec![group(
                 "peer_z",
-                vec![item("peer_z", "Wake Up", "z.flac")],
+                vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
                 0.9,
             )],
         ]);
@@ -1691,14 +1806,14 @@ mod tests {
         let finder = ScriptedFinder::new(vec![
             vec![group(
                 "peer_y",
-                vec![item("peer_y", "Wake Up", "y.flac")],
+                vec![item("peer_y", "Wake Up", "y/Wake Up.flac")],
                 0.9,
             )],
             vec![group(
                 "mixed",
                 vec![
-                    item("peer_y", "Wake Up", "y.flac"),
-                    item("peer_z", "Wake Up", "z.flac"),
+                    item("peer_y", "Wake Up", "y/Wake Up.flac"),
+                    item("peer_z", "Wake Up", "z/Wake Up.flac"),
                 ],
                 0.9,
             )],
@@ -1774,9 +1889,14 @@ mod tests {
             "mixed",
             vec![
                 // Named, with "The" and "&" spelled differently.
-                by("Kowloon and Friends", "peer_b", "Wake Up", "b.flac"),
+                by("Kowloon and Friends", "peer_b", "Wake Up", "b/Wake Up.flac"),
                 // Named with its significant words in another order.
-                by("Friends & Kowloon, The", "peer_c", "Wake Up", "c.flac"),
+                by(
+                    "Friends & Kowloon, The",
+                    "peer_c",
+                    "Wake Up",
+                    "c/Wake Up.flac",
+                ),
                 // No artist, but the folder names it.
                 by(
                     "",
@@ -1788,7 +1908,7 @@ mod tests {
                     "Unknown Artist",
                     "peer_e",
                     "Wake Up",
-                    "share/the_kowloon_and_friends/07.flac",
+                    "share/the_kowloon_and_friends/07 - Wake Up.flac",
                 ),
                 // No artist, and nothing in the path says whose it is.
                 by("", "peer_f", "Wake Up", "Music\\Misc\\07 - Wake Up.flac"),
@@ -1799,7 +1919,7 @@ mod tests {
                     "Wake Up",
                     "Someone Else\\07 - Wake Up.flac",
                 ),
-                by("Kowloon Tong", "peer_h", "Wake Up", "h.flac"),
+                by("Kowloon Tong", "peer_h", "Wake Up", "h/Wake Up.flac"),
             ],
             0.9,
         )];
@@ -1815,11 +1935,11 @@ mod tests {
     fn a_candidate_of_unknown_length_ranks_after_the_timed_ones() {
         let untimed = DownloadableItem {
             duration: None,
-            ..item("peer_unknown", "Wake Up", "u.flac")
+            ..item("peer_unknown", "Wake Up", "u/Wake Up.flac")
         };
         let timed = DownloadableItem {
             duration: Some(205),
-            ..item("peer_timed", "Wake Up", "t.flac")
+            ..item("peer_timed", "Wake Up", "t/Wake Up.flac")
         };
         let groups = vec![
             group("peer_unknown", vec![untimed], 0.9),
@@ -1927,6 +2047,104 @@ mod tests {
         assert!(usable_candidates(&item("peer_a", "", "b.flac"), groups, &[]).is_empty());
     }
 
+    /// Whether `usable_candidates` keeps `candidate` for the fixture's
+    /// "Wake Up" by Kowloon, 200s long.
+    fn researched_usable(candidate: DownloadableItem) -> bool {
+        let original = item("peer_a", "Wake Up", "Kowloon\\Come Over\\07 - Wake Up.flac");
+        let groups = vec![group(&candidate.source.clone(), vec![candidate], 0.9)];
+        !usable_candidates(&original, groups, &[]).is_empty()
+    }
+
+    #[test]
+    fn a_researched_file_of_another_song_is_rejected_despite_its_label() {
+        // slskd labels every result of a one-track search with the wanted
+        // title, so the file's own name has to say which song it is.
+        assert!(!researched_usable(item(
+            "peer_x",
+            "Wake Up",
+            "Kowloon\\Album\\05 - Other Song.flac"
+        )));
+    }
+
+    #[test]
+    fn a_researched_file_named_for_the_song_is_accepted() {
+        for id in [
+            "Kowloon\\Album\\03 - Wake Up.flac",
+            "Kowloon - Wake Up (2011 Remaster).mp3",
+            "music/Kowloon/Come Over/Kowloon - 07 - Wake Up.flac",
+            "music/Kowloon/Come Over/07 - Kowloon - Wake Up.flac",
+            "Kowloon\\Come Over\\Kowloon - Come Over - 07 - Wake Up.flac",
+            "Kowloon\\Come Over\\07_Wake_Up.flac",
+        ] {
+            assert!(
+                researched_usable(item("peer_x", "Wake Up", id)),
+                "{id:?} is the song"
+            );
+        }
+    }
+
+    #[test]
+    fn a_researched_file_of_another_recording_is_rejected() {
+        for id in [
+            "Kowloon\\Album\\Wake Up (Live).flac",
+            "Wake Up (Live).flac",
+            "Kowloon\\Album\\03 - Wake Up Remix.flac",
+            "Kowloon\\Album\\Kowloon - Wake Up Again.flac",
+        ] {
+            assert!(
+                !researched_usable(item("peer_x", "Wake Up", id)),
+                "{id:?} is another recording"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_named_only_by_its_track_number_is_rejected() {
+        // Rule (b): a stem without letters cannot say which song it is,
+        // whether or not its length matches.
+        assert!(!researched_usable(item(
+            "peer_x",
+            "Wake Up",
+            "Kowloon\\Album\\07.flac"
+        )));
+        assert!(!researched_usable(DownloadableItem {
+            duration: None,
+            ..item("peer_x", "Wake Up", "Kowloon\\Album\\07.flac")
+        }));
+    }
+
+    #[test]
+    fn from_tracks_rejects_an_alternate_whose_file_is_another_song() {
+        let tracks = vec![Some(item(
+            "peer_a",
+            "Wake Up",
+            "Kowloon\\Come Over\\07 - Wake Up.flac",
+        ))];
+        let rest = vec![group(
+            "peer_b",
+            vec![
+                item(
+                    "peer_b",
+                    "Wake Up",
+                    "Kowloon\\Come Over\\05 - Other Song.flac",
+                ),
+                item("peer_b", "Wake Up", "Kowloon\\Come Over\\08.flac"),
+                item("peer_b", "Wake Up", "Kowloon\\Come Over\\07 - Wake Up.flac"),
+            ],
+            0.9,
+        )];
+
+        let mut pool = SourcePool::from_tracks(&tracks, &rest);
+        assert_eq!(
+            pool.take_next(0).map(|i| i.id),
+            Some("Kowloon\\Come Over\\07 - Wake Up.flac".to_string())
+        );
+        assert!(
+            pool.take_next(0).is_none(),
+            "only the named file is an alternate"
+        );
+    }
+
     /// Wait until `finder` has been asked `count` queries.
     async fn queries_reach(finder: &ScriptedFinder, count: usize) {
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -1946,7 +2164,7 @@ mod tests {
                 "peer_z",
                 titles
                     .iter()
-                    .map(|t| item("peer_z", t, &format!("z-{t}.flac")))
+                    .map(|t| item("peer_z", t, &format!("z/{t}.flac")))
                     .collect(),
                 0.9,
             )]
@@ -2060,7 +2278,7 @@ mod tests {
             vec![],
             vec![group(
                 "peer_z",
-                vec![item("peer_z", "Wake Up", "z.flac")],
+                vec![item("peer_z", "Wake Up", "z/Wake Up.flac")],
                 0.9,
             )],
         ]);

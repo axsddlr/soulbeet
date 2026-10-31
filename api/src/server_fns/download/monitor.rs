@@ -2497,7 +2497,7 @@ mod tests {
     fn found_on_peer_z() -> Vec<Vec<shared::download::DownloadableGroup>> {
         vec![vec![group(
             "peer_z",
-            vec![item("peer_z", "Wake Up", "dirZ/zzz.flac")],
+            vec![item("peer_z", "Wake Up", "dirZ/Wake Up.flac")],
             0.9,
         )]]
     }
@@ -2541,7 +2541,7 @@ mod tests {
         poll_tracks(&mut m, &stalled, &backend).await;
 
         assert_eq!(m.tracked_files[0].source, "peer_z");
-        assert_eq!(m.tracked_files[0].transfer_id, "t-dirZ/zzz.flac");
+        assert_eq!(m.tracked_files[0].transfer_id, "t-dirZ/Wake Up.flac");
     }
 
     #[tokio::test]

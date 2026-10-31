@@ -502,7 +502,7 @@ mod tests {
             .collect();
         let finder = ScriptedFinder::new(vec![vec![group(
             "q",
-            vec![item("q", "Two", "q-2.flac")],
+            vec![item("q", "Two", "q/Two.flac")],
             0.9,
         )]]);
         let backend: Arc<dyn DownloadBackend> = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
