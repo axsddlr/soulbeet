@@ -24,9 +24,10 @@ pub(crate) fn library_db(root: &Path) -> std::path::PathBuf {
         .map(std::path::PathBuf::from);
     let db = library_db_in(root, dir.as_deref());
     if dir.is_some() {
-        prepare_db(root, &db);
+        choose_db(root, &db, link_file)
+    } else {
+        db
     }
-    db
 }
 
 /// The library db for `root`: `<root>/.beets_library.db`, or with `dir` set a
@@ -66,33 +67,66 @@ fn link_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::hard_link(from, to)
 }
 
-fn migrate_with(_legacy: &Path, _new: &Path, _link: Linker) -> bool {
-    false
-}
-
-fn choose_db(_root: &Path, db: &Path, _link: Linker) -> std::path::PathBuf {
-    db.to_path_buf()
-}
-
-/// Creates the db's directory and copies the legacy db over once.
-fn prepare_db(root: &Path, db: &Path) {
-    if let Some(parent) = db.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            warn!("Could not create {:?}: {e}", parent);
+/// The db beets should use for `root`, given the relocated path `db`: creates
+/// its directory and migrates the legacy db once. If that fails while a legacy
+/// db exists, returns the legacy path instead, because pointing beets at a
+/// fresh empty db would make the library look empty.
+fn choose_db(root: &Path, db: &Path, link: Linker) -> std::path::PathBuf {
+    let legacy = root.join(".beets_library.db");
+    let migrated = match db.parent().map_or(Ok(()), std::fs::create_dir_all) {
+        Ok(()) => try_migrate(&legacy, db, link),
+        Err(e) => Err(e),
+    };
+    match migrated {
+        Ok(true) => info!("Copied beets library {:?} to {:?}", legacy, db),
+        Ok(false) => {}
+        Err(e) if !db.exists() && legacy.is_file() => {
+            warn!(
+                "Could not move beets library {:?} to {:?}: {e}. Using {:?} for now;                  check that BEETS_LIBRARY_DIR is a writable local directory",
+                legacy, db, legacy
+            );
+            return legacy;
         }
+        Err(e) => warn!("Could not prepare beets library {:?}: {e}", db),
     }
-    migrate_legacy_db(&root.join(".beets_library.db"), db);
+    db.to_path_buf()
 }
 
 /// Copies `legacy` to `new` when only the legacy file exists. Copies rather
 /// than moves so a rollback still finds it, and never overwrites `new`.
+#[cfg(test)]
+pub(crate) fn migrate_legacy_db(legacy: &Path, new: &Path) -> bool {
+    migrate_with(legacy, new, link_file)
+}
+
+#[cfg(test)]
+fn migrate_with(legacy: &Path, new: &Path, link: Linker) -> bool {
+    match try_migrate(legacy, new, link) {
+        Ok(copied) => {
+            if copied {
+                info!("Copied beets library {:?} to {:?}", legacy, new);
+            }
+            copied
+        }
+        Err(e) => {
+            warn!("Could not copy beets library {:?} to {:?}: {e}", legacy, new);
+            false
+        }
+    }
+}
+
+/// `Ok(true)` when it copied, `Ok(false)` when there was nothing to do (no
+/// legacy db, or `new` already exists), `Err` when the copy failed.
 ///
 /// The copy goes to a temp sibling and is then hard-linked into place, so a
 /// concurrent caller sees either no `new` or a complete one, never a partial
-/// file, and an existing `new` is never replaced.
-pub(crate) fn migrate_legacy_db(legacy: &Path, new: &Path) -> bool {
+/// file, and an existing `new` is never replaced. Where hard links are not
+/// supported (some FUSE or exFAT mounts) it falls back to a rename after
+/// checking again that `new` is absent; that leaves a tiny window in which a
+/// concurrent writer's file could be replaced.
+fn try_migrate(legacy: &Path, new: &Path, link: Linker) -> std::io::Result<bool> {
     if new.exists() || !legacy.is_file() {
-        return false;
+        return Ok(false);
     }
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -101,20 +135,15 @@ pub(crate) fn migrate_legacy_db(legacy: &Path, new: &Path) -> bool {
     tmp_name.push(format!(".tmp-{}-{nanos}", std::process::id()));
     let tmp = std::path::PathBuf::from(tmp_name);
 
-    let result = std::fs::copy(legacy, &tmp).and_then(|_| std::fs::hard_link(&tmp, new));
-    let _ = std::fs::remove_file(&tmp);
-    match result {
-        Ok(()) => {
-            info!("Copied beets library {:?} to {:?}", legacy, new);
-            true
-        }
+    let result = std::fs::copy(legacy, &tmp).and_then(|_| match link(&tmp, new) {
+        Ok(()) => Ok(true),
         // Someone else migrated first; theirs stays.
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,
-        Err(e) => {
-            warn!("Could not copy beets library {:?} to {:?}: {e}", legacy, new);
-            false
-        }
-    }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(_) if new.exists() => Ok(false),
+        Err(_) => std::fs::rename(&tmp, new).map(|()| true),
+    });
+    let _ = std::fs::remove_file(&tmp);
+    result
 }
 
 fn parse_row(row: &str, library: &str) -> Option<LibraryTrack> {
