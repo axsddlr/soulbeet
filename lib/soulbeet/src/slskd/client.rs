@@ -71,6 +71,9 @@ struct SearchContext {
     seen_response_count: usize,
     /// Keep only `.flac` files, before they are matched and scored.
     require_flac: bool,
+    /// Keep only files whose path names the searched artist. Set when the
+    /// artist-less fallback starts: its query no longer filters by artist.
+    artist_required: bool,
 }
 
 #[derive(Debug)]
@@ -338,6 +341,7 @@ impl SoulseekClient {
                 timeout,
                 seen_response_count: 0,
                 require_flac,
+                artist_required: false,
             },
         );
 
@@ -415,6 +419,7 @@ impl SoulseekClient {
                             ctx.slskd_id = slskd_id.clone();
                             ctx.start_time = Utc::now();
                             ctx.seen_response_count = 0;
+                            ctx.artist_required = true;
                             true
                         }
                         None => false,
@@ -484,6 +489,7 @@ impl SoulseekClient {
                             context.album.as_deref(),
                             &track_titles_ref,
                             context.require_flac,
+                            context.artist_required,
                         );
 
                         albums.sort_by(|a, b| {
@@ -527,6 +533,7 @@ impl SoulseekClient {
                                 context.album.as_deref(),
                                 &track_titles_ref,
                                 context.require_flac,
+                                context.artist_required,
                             );
                             albums.sort_by(|a, b| {
                                 b.score
@@ -1591,6 +1598,7 @@ mod tests {
             timeout: Duration::seconds(120),
             seen_response_count: 0,
             require_flac: false,
+            artist_required: false,
         }
     }
 
@@ -1782,10 +1790,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_fallback_is_still_scored_against_the_artist_and_runs_once() {
+    async fn the_fallback_keeps_only_artist_confirmed_files_and_runs_once() {
         // The artist-less search is answered by the searched artist's file
-        // and by another artist's file of the same title. Scoring still uses
-        // the searched artist, so the other artist's folder ranks lower.
+        // and by another artist's file of the same title. Only the file whose
+        // path names the searched artist is kept.
         let (url, seen) = fake_slskd(searches_answering(vec![
             serde_json::json!([]),
             serde_json::json!([{
@@ -1829,14 +1837,76 @@ mod tests {
             }
         }
         assert_eq!(last, SearchState::Completed);
-        assert_eq!(albums.len(), 2);
+        assert_eq!(albums.len(), 1);
         assert!(albums[0].album_path.contains("Static Harbor"));
-        assert!(albums[1].album_path.contains("Other Band"));
-        assert!(albums[0].score > albums[1].score);
+        assert!(albums.iter().all(|a| !a.album_path.contains("Other Band")));
         assert_eq!(
             search_texts(&seen),
             vec!["Static Harbor Paper Lanterns", "Paper Lanterns"]
         );
+    }
+
+    #[tokio::test]
+    async fn an_album_fallback_drops_another_artists_same_titled_album() {
+        let files = |folder: &str| {
+            serde_json::json!([
+                { "filename": format!(r"Music\{folder}\01 - Northern Line.flac"), "size": 30_000_000 },
+                { "filename": format!(r"Music\{folder}\02 - Glass Atlas.flac"), "size": 30_000_000 }
+            ])
+        };
+        let (url, seen) = fake_slskd(searches_answering(vec![
+            serde_json::json!([]),
+            serde_json::json!([
+                {
+                    "username": "elsewhere",
+                    "files": files("Other Band - Come Over"),
+                    "hasFreeUploadSlot": true,
+                    "uploadSpeed": 1_000_000,
+                    "queueLength": 0
+                },
+                {
+                    "username": "own",
+                    "files": files("Kowloon - Come Over"),
+                    "hasFreeUploadSlot": true,
+                    "uploadSpeed": 1_000_000,
+                    "queueLength": 0
+                }
+            ]),
+        ]));
+        let client = client_for(&url);
+        let album: Album = serde_json::from_value(serde_json::json!({
+            "id": "a1", "title": "Come Over", "artist": "Kowloon"
+        }))
+        .unwrap();
+        let id = client
+            .start_search(
+                Some(album),
+                vec![
+                    track("Kowloon", "Northern Line"),
+                    track("Kowloon", "Glass Atlas"),
+                ],
+                Duration::seconds(120),
+                false,
+            )
+            .await
+            .unwrap();
+
+        let mut last = SearchState::InProgress;
+        let mut albums = Vec::new();
+        for _ in 0..5 {
+            let (found, _, state) = client.poll_search(id.clone()).await.unwrap();
+            if !found.is_empty() {
+                albums = found;
+            }
+            last = state;
+            if last != SearchState::InProgress {
+                break;
+            }
+        }
+        assert_eq!(last, SearchState::Completed);
+        assert_eq!(search_texts(&seen), vec!["Kowloon Come Over", "Come Over"]);
+        let users: Vec<&str> = albums.iter().map(|a| a.username.as_str()).collect();
+        assert_eq!(users, vec!["own"]);
     }
 
     #[tokio::test]

@@ -13,6 +13,9 @@ pub fn process_search_responses(
     expected_tracks: &[&str],
     // Strict mode: drop every file that is not FLAC before matching.
     require_flac: bool,
+    // Drop every file whose path does not name the searched artist: set for
+    // the artist-less retry, whose query no longer filtered by artist.
+    require_artist: bool,
 ) -> Vec<AlbumResult> {
     const MIN_SCORE_THRESHOLD: f64 = 0.6;
     let scored_files: Vec<(MatchResult, SearchResult)> = responses
@@ -35,6 +38,11 @@ pub fn process_search_responses(
                 );
 
                 if rank_result.total_score < MIN_SCORE_THRESHOLD {
+                    return None;
+                }
+                // No word of the searched artist in any folder or the file
+                // name: the path does not confirm the artist.
+                if require_artist && rank_result.artist_score <= 0.0 {
                     return None;
                 }
 
@@ -204,7 +212,7 @@ mod tests {
     }
 
     fn search(responses: &[SearchResponse], require_flac: bool) -> Vec<AlbumResult> {
-        process_search_responses(responses, ARTIST, Some(ALBUM), &TRACKS, require_flac)
+        process_search_responses(responses, ARTIST, Some(ALBUM), &TRACKS, require_flac, false)
     }
 
     fn sources(albums: &[AlbumResult]) -> Vec<String> {
@@ -269,5 +277,92 @@ mod tests {
 
         assert_eq!(sources(&search(&responses, false)), vec!["bare"]);
         assert!(search(&responses, true).is_empty());
+    }
+
+    /// The same album title and track names, shared from another artist's
+    /// folder.
+    fn other_artist_album() -> Vec<String> {
+        TRACKS
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!("Music\\Other Band - {ALBUM}\\0{} - {t}.flac", i + 1))
+            .collect()
+    }
+
+    fn album_search(responses: &[SearchResponse], require_artist: bool) -> Vec<AlbumResult> {
+        process_search_responses(
+            responses,
+            ARTIST,
+            Some(ALBUM),
+            &TRACKS,
+            false,
+            require_artist,
+        )
+    }
+
+    #[test]
+    fn requiring_the_artist_drops_another_artists_same_titled_album() {
+        let other = other_artist_album();
+        let responses = [peer("elsewhere", &refs(&other))];
+
+        assert!(album_search(&responses, true).is_empty());
+    }
+
+    #[test]
+    fn requiring_the_artist_keeps_the_artists_own_album() {
+        let own = album_files("FLAC", ".flac");
+        let other = other_artist_album();
+        let responses = [peer("own", &refs(&own)), peer("elsewhere", &refs(&other))];
+
+        assert_eq!(sources(&album_search(&responses, true)), vec!["own"]);
+    }
+
+    #[test]
+    fn without_requiring_the_artist_matching_is_unchanged() {
+        // Today an exact title by the wrong artist still clears the score
+        // threshold; a normal search keeps it.
+        let other = other_artist_album();
+        let responses = [peer("elsewhere", &refs(&other))];
+        assert_eq!(sources(&album_search(&responses, false)), vec!["elsewhere"]);
+
+        let responses = [peer(
+            "elsewhere",
+            &[r"Music\Other Band\Somewhere\05 - Paper Lanterns.flac"],
+        )];
+        let albums = process_search_responses(
+            &responses,
+            "Static Harbor",
+            None,
+            &["Paper Lanterns"],
+            false,
+            false,
+        );
+        assert_eq!(
+            filenames(&albums),
+            vec![r"Music\Other Band\Somewhere\05 - Paper Lanterns.flac"]
+        );
+    }
+
+    #[test]
+    fn requiring_the_artist_drops_another_artists_same_titled_track() {
+        let responses = [peer(
+            "elsewhere",
+            &[
+                r"Music\Other Band\Somewhere\05 - Paper Lanterns.flac",
+                r"Music\Static Harbor\Glass Atlas\02 - Paper Lanterns.flac",
+            ],
+        )];
+        let albums = process_search_responses(
+            &responses,
+            "Static Harbor",
+            None,
+            &["Paper Lanterns"],
+            false,
+            true,
+        );
+        assert_eq!(
+            filenames(&albums),
+            vec![r"Music\Static Harbor\Glass Atlas\02 - Paper Lanterns.flac"]
+        );
     }
 }
