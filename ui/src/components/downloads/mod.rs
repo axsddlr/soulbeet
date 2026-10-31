@@ -141,13 +141,14 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
     });
 
     let (modal_opacity, panel_translate, pointer_events) = if (*props.is_open)() {
-        ("opacity-100", "translate-x-0", "pointer-events-auto")
+        ("opacity-100 visible", "translate-x-0", "pointer-events-auto")
     } else {
-        ("opacity-0", "translate-x-full", "pointer-events-none")
+        // Hidden once the fade ends: nothing closed can take a click or focus.
+        ("opacity-0 invisible", "translate-x-full", "pointer-events-none")
     };
 
     rsx! {
-      div { class: "fixed inset-0 z-50 flex justify-end transition-opacity duration-200 ease-out {modal_opacity} {pointer_events}",
+      div { class: "fixed inset-0 z-50 flex justify-end transition-[opacity,visibility] duration-200 ease-out {modal_opacity} {pointer_events}",
         // Backdrop
         div {
           class: "absolute inset-0 bg-black/70 cursor-pointer",
