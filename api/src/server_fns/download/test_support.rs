@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
+use super::failover::AlternateFinder;
 use crate::transfer_registry::{BatchRef, TransferKey, TransferOwner};
 
 pub fn item(source: &str, title: &str, id: &str) -> DownloadableItem {
@@ -261,5 +262,83 @@ impl DownloadBackend for StubBackend {
     }
     async fn health_check(&self) -> bool {
         true
+    }
+}
+
+/// Answers each re-search from a scripted list, then finds nothing once the
+/// script runs out. Records every query as `"<artist> <title>"`, trimmed, so
+/// a title-only query reads as the bare title.
+pub struct ScriptedFinder {
+    answers: Mutex<Vec<Vec<DownloadableGroup>>>,
+    queries: Mutex<Vec<String>>,
+    hold: Mutex<Option<Hold>>,
+    /// How many of the next searches error instead of answering.
+    failures: AtomicUsize,
+}
+
+impl ScriptedFinder {
+    pub fn new(answers: Vec<Vec<DownloadableGroup>>) -> Arc<Self> {
+        Arc::new(Self {
+            answers: Mutex::new(answers),
+            queries: Mutex::new(Vec::new()),
+            hold: Mutex::new(None),
+            failures: AtomicUsize::new(0),
+        })
+    }
+
+    /// Makes the next `count` searches fail, as a rate-limited or
+    /// unreachable slskd does, without taking an answer off the script.
+    pub fn fail_searches(&self, count: usize) {
+        self.failures.store(count, Ordering::SeqCst);
+    }
+
+    /// Makes each search wait, as a slow slskd search does: the first
+    /// notifier fires when a query arrives (it is recorded by then), and the
+    /// query answers once the second one is notified.
+    pub fn hold_searches(&self) -> (Arc<Notify>, Arc<Notify>) {
+        let hold = Hold {
+            reached: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        };
+        *self.hold.lock().unwrap() = Some(hold.clone());
+        (hold.reached, hold.release)
+    }
+
+    /// Every query the finder was asked, in order.
+    pub fn queries(&self) -> Vec<String> {
+        self.queries.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl AlternateFinder for ScriptedFinder {
+    async fn search(
+        &self,
+        _backend: &Arc<dyn DownloadBackend>,
+        artist: &str,
+        title: &str,
+    ) -> SoulResult<Vec<DownloadableGroup>> {
+        self.queries
+            .lock()
+            .unwrap()
+            .push(format!("{artist} {title}").trim().to_string());
+        let hold = self.hold.lock().unwrap().clone();
+        if let Some(hold) = hold {
+            hold.reached.notify_one();
+            hold.release.notified().await;
+        }
+        let failed = self
+            .failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if failed {
+            return Err(SoulseekError::SearchTimeout);
+        }
+        let mut answers = self.answers.lock().unwrap();
+        Ok(if answers.is_empty() {
+            Vec::new()
+        } else {
+            answers.remove(0)
+        })
     }
 }

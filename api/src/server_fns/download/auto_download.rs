@@ -31,9 +31,15 @@ use super::enqueue::{
     deliver, enqueue_request, failed_reason, stopped_rows, RequestEnqueue, Watcher,
 };
 #[cfg(feature = "server")]
-use super::failover::{align_pool_tracks, SourcePool};
+use super::failover::{align_pool_tracks, AlternateFinder, SourcePool};
 #[cfg(feature = "server")]
 use super::monitor::{DownloadMonitor, WatchedTransfer};
+#[cfg(feature = "server")]
+use shared::metadata::{Album, Track};
+#[cfg(feature = "server")]
+use soulbeet::error::Result as SoulResult;
+#[cfg(feature = "server")]
+use soulbeet::DownloadBackend;
 
 /// Score threshold for automatic source selection (per D-04).
 /// Below this, the client gets FallbackToManual with results attached.
@@ -63,6 +69,111 @@ pub enum AutoDownloadResult {
     Accepted { batch_id: String },
     /// Error before pipeline could start (no backends, bad input, etc.)
     Error(String),
+}
+
+/// One backend's results for a search, scored by the backend, or nothing
+/// when it fails or finds nothing within `SEARCH_TIMEOUT`.
+#[cfg(feature = "server")]
+pub(super) async fn search_backend(
+    id: &str,
+    backend: &Arc<dyn DownloadBackend>,
+    album: Option<&Album>,
+    tracks: &[Track],
+) -> Vec<DownloadableGroup> {
+    try_search_backend(id, backend, album, tracks)
+        .await
+        .unwrap_or_default()
+}
+
+/// `search_backend`, but a search that could not start, or whose polls
+/// errored before it returned anything, is an `Err` rather than nothing. A
+/// poll error after some results keeps those.
+#[cfg(feature = "server")]
+async fn try_search_backend(
+    id: &str,
+    backend: &Arc<dyn DownloadBackend>,
+    album: Option<&Album>,
+    tracks: &[Track],
+) -> SoulResult<Vec<DownloadableGroup>> {
+    let search_id = match backend.start_search(album, tracks).await {
+        Ok(sid) => sid,
+        Err(e) => {
+            warn!("Backend {} search start failed: {}", id, e);
+            return Err(e);
+        }
+    };
+
+    // Poll until results are ready or timeout. Polls that report
+    // InProgress carry the groups processed so far (the backend
+    // rescores the full response set each time), so keep the
+    // latest non-empty batch: the final Completed poll is empty
+    // when the search ends by timeout instead of result volume.
+    let deadline = tokio::time::Instant::now() + SEARCH_TIMEOUT;
+    let mut latest_groups = Vec::<DownloadableGroup>::new();
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            warn!("Backend {} search timed out", id);
+            break;
+        }
+        tokio::time::sleep(SEARCH_POLL_INTERVAL).await;
+
+        match backend.poll_search(&search_id).await {
+            Ok(result) => match result.state {
+                SearchState::Completed | SearchState::TimedOut => {
+                    if !result.groups.is_empty() {
+                        latest_groups = result.groups;
+                    }
+                    return Ok(latest_groups);
+                }
+                SearchState::NotFound => {
+                    return Ok(latest_groups);
+                }
+                SearchState::InProgress => {
+                    if !result.groups.is_empty() {
+                        latest_groups = result.groups;
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("Backend {} poll error: {}", id, e);
+                return if latest_groups.is_empty() {
+                    Err(e)
+                } else {
+                    Ok(latest_groups)
+                };
+            }
+        }
+    }
+    Ok(latest_groups)
+}
+
+/// Re-searches a failing track on the backend its batch downloads from,
+/// passing on a search that could not start or answer as an error.
+#[cfg(feature = "server")]
+pub(super) struct BackendFinder;
+
+#[cfg(feature = "server")]
+#[async_trait::async_trait]
+impl AlternateFinder for BackendFinder {
+    async fn search(
+        &self,
+        backend: &Arc<dyn DownloadBackend>,
+        artist: &str,
+        title: &str,
+    ) -> SoulResult<Vec<DownloadableGroup>> {
+        let track = Track {
+            id: String::new(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album_id: None,
+            album_title: None,
+            release_date: None,
+            duration: None,
+            mbid: None,
+            release_mbid: None,
+        };
+        try_search_backend(backend.id(), backend, None, &[track]).await
+    }
 }
 
 #[post("/api/auto-download", auth: AuthSession)]
@@ -163,60 +274,9 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
         // Search all backends in parallel (per D-06)
         let search_futures: Vec<_> = backends
             .iter()
-            .map(|(id, backend)| {
-                let id = id.clone();
-                let backend = Arc::clone(backend);
-                let album = album.clone();
-                let tracks = tracks.clone();
-                async move {
-                    // Start search
-                    let search_id = match backend.start_search(album.as_ref(), &tracks).await {
-                        Ok(sid) => sid,
-                        Err(e) => {
-                            warn!("Backend {} search start failed: {}", id, e);
-                            return (id, Vec::<DownloadableGroup>::new());
-                        }
-                    };
-
-                    // Poll until results are ready or timeout. Polls that report
-                    // InProgress carry the groups processed so far (the backend
-                    // rescores the full response set each time), so keep the
-                    // latest non-empty batch: the final Completed poll is empty
-                    // when the search ends by timeout instead of result volume.
-                    let deadline = tokio::time::Instant::now() + SEARCH_TIMEOUT;
-                    let mut latest_groups = Vec::<DownloadableGroup>::new();
-                    loop {
-                        if tokio::time::Instant::now() >= deadline {
-                            warn!("Backend {} search timed out", id);
-                            break;
-                        }
-                        tokio::time::sleep(SEARCH_POLL_INTERVAL).await;
-
-                        match backend.poll_search(&search_id).await {
-                            Ok(result) => match result.state {
-                                SearchState::Completed | SearchState::TimedOut => {
-                                    if !result.groups.is_empty() {
-                                        latest_groups = result.groups;
-                                    }
-                                    return (id, latest_groups);
-                                }
-                                SearchState::NotFound => {
-                                    return (id, latest_groups);
-                                }
-                                SearchState::InProgress => {
-                                    if !result.groups.is_empty() {
-                                        latest_groups = result.groups;
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                warn!("Backend {} poll error: {}", id, e);
-                                return (id, latest_groups);
-                            }
-                        }
-                    }
-                    (id, latest_groups)
-                }
+            .map(|(id, backend)| async {
+                let groups = search_backend(id, backend, album.as_ref(), &tracks).await;
+                (id.clone(), groups)
             })
             .collect();
 
@@ -456,7 +516,7 @@ pub async fn auto_download(req: AutoDownloadRequest) -> Result<AutoDownloadResul
             task_username.clone(),
             batch,
         )
-        .with_failover(pool);
+        .with_failover(pool.with_finder(Arc::new(BackendFinder)));
         monitor.run().await;
         unregister_user_task(&task_username).await;
     });
