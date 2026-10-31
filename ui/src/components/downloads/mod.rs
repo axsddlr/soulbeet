@@ -6,8 +6,10 @@ use dioxus::logger::tracing::warn;
 use dioxus::prelude::*;
 use shared::download::{DownloadProgress, DownloadState, ImportChoice, KeptImport, MatchChoices};
 
+mod activity_bar;
 mod item;
 mod picker;
+pub use activity_bar::ActivityBar;
 use api::CancelDownloadRequest;
 use item::DownloadItem;
 
