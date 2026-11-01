@@ -46,7 +46,7 @@ The recommended way to run Soulbeet is via Docker Compose. This ensures all depe
 ```yaml
 services:
   soulbeet:
-    image: docker.io/docccccc/soulbeet:latest
+    image: ghcr.io/axsddlr/soulbeet:latest
     restart: unless-stopped
     ports:
       - 9765:9765
@@ -92,7 +92,7 @@ services:
 ```bash
 TAG=latest # the tag on your image: line (latest, light, medium or full)
 mkdir -p beets
-docker create --name sb "docker.io/docccccc/soulbeet:$TAG"
+docker create --name sb "ghcr.io/axsddlr/soulbeet:$TAG"
 docker cp sb:/app/beets_config.yaml ./beets/config.yaml
 docker rm sb
 ```

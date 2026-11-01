@@ -79,6 +79,9 @@ jobs:
     needs: bump-version
     if: always() && (needs.bump-version.result == 'success' || github.event_name == 'push')
     uses: ./.github/workflows/image-build-push.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       ref: ${{ needs.bump-version.outputs.tag || github.ref_name }}
       tags: |
