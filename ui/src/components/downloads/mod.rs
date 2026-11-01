@@ -23,7 +23,7 @@ pub struct DownloadsProps {
 
 #[component]
 pub fn Downloads(mut props: DownloadsProps) -> Element {
-    let active_downloads = sorted_rows(&props.downloads.read());
+    let active_downloads: Vec<DownloadProgress> = props.downloads.read().values().cloned().collect();
 
     // Count specific states for the header summary
     let processing_count = active_downloads
@@ -278,16 +278,21 @@ fn show_failure(row: &mut DownloadProgress, error: &ServerFnError, from_picker: 
     Failure::OnRow
 }
 
-/// Rows by state, then by item so rows with the same state keep their place.
-fn sorted_rows(downloads: &HashMap<String, DownloadProgress>) -> Vec<DownloadProgress> {
-    let mut rows: Vec<DownloadProgress> = downloads.values().cloned().collect();
-    rows.sort_by(|a, b| {
-        a.state
-            .partial_cmp(&b.state)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.item.cmp(&b.item))
-    });
-    rows
+/// One album or batch of rows in the drawer.
+#[derive(Debug, Clone, PartialEq)]
+struct RowGroup {
+    title: String,
+    rows: Vec<DownloadProgress>,
+    done: usize,
+    failed: usize,
+}
+
+fn grouped_rows(_downloads: &HashMap<String, DownloadProgress>) -> Vec<RowGroup> {
+    Vec::new()
+}
+
+fn group_summary(_group: &RowGroup) -> String {
+    String::new()
 }
 
 #[cfg(test)]
@@ -301,19 +306,150 @@ mod tests {
         (item.to_string(), p)
     }
 
+    fn batch_row(item: &str, state: DownloadState, batch: &str) -> (String, DownloadProgress) {
+        let (key, p) = row(item, state);
+        (key, p.with_batch(batch.into(), format!("{batch} album")))
+    }
+
+    fn rows_of(group: &RowGroup) -> Vec<&str> {
+        group.rows.iter().map(|r| r.item.as_str()).collect()
+    }
+
     #[test]
-    fn equal_states_sort_by_item() {
+    fn interleaved_albums_come_out_as_groups_in_title_order() {
         let map: HashMap<String, DownloadProgress> = [
-            row("c", DownloadState::Imported),
-            row("a", DownloadState::Imported),
-            row("z", DownloadState::InProgress),
-            row("b", DownloadState::Imported),
-            row("d", DownloadState::ImportQueued(1)),
+            batch_row("z/02 - two.flac", DownloadState::InProgress, "zeta"),
+            batch_row("a/01 - one.flac", DownloadState::Queued, "alpha"),
+            batch_row("z/01 - one.flac", DownloadState::Imported, "zeta"),
+            batch_row("a/02 - two.flac", DownloadState::Imported, "alpha"),
         ]
         .into_iter()
         .collect();
-        let items: Vec<String> = sorted_rows(&map).into_iter().map(|r| r.item).collect();
-        assert_eq!(items, ["z", "d", "a", "b", "c"]);
+        let groups = grouped_rows(&map);
+        let titles: Vec<&str> = groups.iter().map(|g| g.title.as_str()).collect();
+        assert_eq!(titles, ["alpha album", "zeta album"]);
+        assert_eq!(rows_of(&groups[0]), ["a/01 - one.flac", "a/02 - two.flac"]);
+        assert_eq!(rows_of(&groups[1]), ["z/01 - one.flac", "z/02 - two.flac"]);
+    }
+
+    #[test]
+    fn tracks_sort_by_number_not_text() {
+        let map: HashMap<String, DownloadProgress> = [
+            row("music\\Band\\LP\\10 - b.flac", DownloadState::Queued),
+            row("music\\Band\\LP\\2 - a.flac", DownloadState::Queued),
+            row("music\\Band\\LP\\1 - c.flac", DownloadState::Queued),
+        ]
+        .into_iter()
+        .collect();
+        let groups = grouped_rows(&map);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            rows_of(&groups[0]),
+            [
+                "music\\Band\\LP\\1 - c.flac",
+                "music\\Band\\LP\\2 - a.flac",
+                "music\\Band\\LP\\10 - b.flac",
+            ]
+        );
+    }
+
+    #[test]
+    fn failed_and_cancelled_rows_sink_to_the_bottom_of_their_group() {
+        let map: HashMap<String, DownloadProgress> = [
+            batch_row("LP/01 - a.flac", DownloadState::Failed("x".into()), "b"),
+            batch_row("LP/02 - b.flac", DownloadState::Cancelled, "b"),
+            batch_row("LP/03 - c.flac", DownloadState::Imported, "b"),
+            batch_row("LP/04 - d.flac", DownloadState::InProgress, "b"),
+            batch_row("LP/05 - e.flac", DownloadState::Queued, "b"),
+        ]
+        .into_iter()
+        .collect();
+        let groups = grouped_rows(&map);
+        assert_eq!(
+            rows_of(&groups[0]),
+            [
+                "LP/03 - c.flac",
+                "LP/04 - d.flac",
+                "LP/05 - e.flac",
+                "LP/01 - a.flac",
+                "LP/02 - b.flac",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_finished_download_keeps_its_place() {
+        let mut map: HashMap<String, DownloadProgress> = [
+            batch_row("LP/01 - a.flac", DownloadState::Queued, "b"),
+            batch_row("LP/02 - b.flac", DownloadState::InProgress, "b"),
+            batch_row("LP/03 - c.flac", DownloadState::Queued, "b"),
+        ]
+        .into_iter()
+        .collect();
+        let before: Vec<String> = grouped_rows(&map)[0]
+            .rows
+            .iter()
+            .map(|r| r.item.clone())
+            .collect();
+        map.get_mut("LP/02 - b.flac").unwrap().state = DownloadState::Imported;
+        let after: Vec<String> = grouped_rows(&map)[0]
+            .rows
+            .iter()
+            .map(|r| r.item.clone())
+            .collect();
+        assert_eq!(before, after);
+        assert_eq!(after[1], "LP/02 - b.flac");
+    }
+
+    #[test]
+    fn rows_without_a_batch_group_by_their_folder() {
+        let map: HashMap<String, DownloadProgress> = [
+            row(
+                "music\\Static Harbor\\Glass Atlas\\01 - Northern Line.flac",
+                DownloadState::Queued,
+            ),
+            row("music/Other Band/Blue/01 - x.flac", DownloadState::Queued),
+            row(
+                "music\\Static Harbor\\Glass Atlas\\02 - South.flac",
+                DownloadState::Queued,
+            ),
+            row("loose.flac", DownloadState::Queued),
+        ]
+        .into_iter()
+        .collect();
+        let groups = grouped_rows(&map);
+        let titles: Vec<&str> = groups.iter().map(|g| g.title.as_str()).collect();
+        assert_eq!(titles, ["Blue", "Glass Atlas", "Other"]);
+        assert_eq!(groups[1].rows.len(), 2);
+        assert_eq!(rows_of(&groups[2]), ["loose.flac"]);
+    }
+
+    #[test]
+    fn groups_count_done_and_failed_rows() {
+        let map: HashMap<String, DownloadProgress> = [
+            batch_row("LP/01 - a.flac", DownloadState::Failed("x".into()), "b"),
+            batch_row("LP/02 - b.flac", DownloadState::Cancelled, "b"),
+            batch_row("LP/03 - c.flac", DownloadState::Imported, "b"),
+            batch_row("LP/04 - d.flac", DownloadState::Imported, "b"),
+            batch_row("LP/05 - e.flac", DownloadState::InProgress, "b"),
+        ]
+        .into_iter()
+        .collect();
+        let group = &grouped_rows(&map)[0];
+        assert_eq!((group.done, group.failed), (2, 2));
+        assert_eq!(group.rows.len(), 5);
+        assert_eq!(group_summary(group), "2/5 done · 2 failed");
+    }
+
+    #[test]
+    fn a_group_with_nothing_failed_only_counts_done() {
+        let map: HashMap<String, DownloadProgress> = [
+            batch_row("LP/01 - a.flac", DownloadState::Imported, "b"),
+            batch_row("LP/02 - b.flac", DownloadState::Queued, "b"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(group_summary(&grouped_rows(&map)[0]), "1/2 done");
     }
 
     fn kept_skip() -> DownloadProgress {
