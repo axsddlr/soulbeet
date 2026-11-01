@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -23,11 +24,12 @@ pub struct DownloadsProps {
 
 #[component]
 pub fn Downloads(mut props: DownloadsProps) -> Element {
-    let active_downloads: Vec<DownloadProgress> = props.downloads.read().values().cloned().collect();
+    let groups = grouped_rows(&props.downloads.read());
 
     // Count specific states for the header summary
-    let processing_count = active_downloads
+    let processing_count = groups
         .iter()
+        .flat_map(|g| g.rows.iter())
         .filter(|f| {
             matches!(
                 f.state,
@@ -40,8 +42,9 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
         })
         .count();
 
-    let errored_count = active_downloads
+    let errored_count = groups
         .iter()
+        .flat_map(|g| g.rows.iter())
         .filter(|f| matches!(f.state, DownloadState::Failed(_) | DownloadState::Cancelled))
         .count();
 
@@ -199,19 +202,33 @@ pub fn Downloads(mut props: DownloadsProps) -> Element {
 
           // Content
           div { class: "flex-1 overflow-y-auto px-4 md:px-6 pb-6 no-scrollbar space-y-2",
-            if active_downloads.is_empty() {
+            if groups.is_empty() {
               div { class: "text-center text-muted py-10 text-sm",
                 "No active transfers in the queue."
               }
             }
 
-            for file in active_downloads.iter() {
-              DownloadItem {
-                key: "{file.item}",
-                file: file.clone(),
-                on_cancel: cancel_download,
-                on_import: import_again,
-                on_load_choices: load_choices,
+            for group in groups.iter() {
+              div {
+                key: "{group.key}",
+                class: "download-album space-y-2",
+                role: "group",
+                aria_label: "{group.title}",
+                div { class: "flex items-baseline justify-between gap-3 pt-3 pb-0.5",
+                  h4 { class: "text-xs font-semibold uppercase tracking-wider text-white truncate",
+                    "{group.title}"
+                  }
+                  span { class: "text-xs text-muted shrink-0", {group_summary(group)} }
+                }
+                for file in group.rows.iter() {
+                  DownloadItem {
+                    key: "{file.item}",
+                    file: file.clone(),
+                    on_cancel: cancel_download,
+                    on_import: import_again,
+                    on_load_choices: load_choices,
+                  }
+                }
               }
             }
           }
@@ -278,21 +295,131 @@ fn show_failure(row: &mut DownloadProgress, error: &ServerFnError, from_picker: 
     Failure::OnRow
 }
 
+/// The folder a remote path sits in; the path may use `\` or `/`.
+fn parent_folder(item: &str) -> Option<String> {
+    let normalized = item.replace('\\', "/");
+    std::path::Path::new(&normalized)
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|s| s.to_string_lossy().into_owned())
+}
+
+/// The file name of a remote path, without its folders.
+fn file_name(item: &str) -> &str {
+    item.rsplit(['/', '\\']).next().unwrap_or(item)
+}
+
+/// Compares case-insensitively, with runs of digits compared as numbers so
+/// "2 - x" comes before "10 - x".
+fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let (a, b) = (a.to_lowercase(), b.to_lowercase());
+    let (mut a, mut b) = (a.as_str(), b.as_str());
+    loop {
+        match (a.chars().next(), b.chars().next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let end_a = a.find(|c: char| !c.is_ascii_digit()).unwrap_or(a.len());
+                let end_b = b.find(|c: char| !c.is_ascii_digit()).unwrap_or(b.len());
+                let num_a = a[..end_a].trim_start_matches('0');
+                let num_b = b[..end_b].trim_start_matches('0');
+                let ord = num_a.len().cmp(&num_b.len()).then_with(|| num_a.cmp(num_b));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                a = &a[end_a..];
+                b = &b[end_b..];
+            }
+            (Some(x), Some(y)) => {
+                if x != y {
+                    return x.cmp(&y);
+                }
+                a = &a[x.len_utf8()..];
+                b = &b[y.len_utf8()..];
+            }
+        }
+    }
+}
+
+/// Rows that will not reach the library on their own; they go last in their group.
+fn is_failed(state: &DownloadState) -> bool {
+    matches!(state, DownloadState::Failed(_) | DownloadState::Cancelled)
+}
+
 /// One album or batch of rows in the drawer.
 #[derive(Debug, Clone, PartialEq)]
 struct RowGroup {
+    key: String,
     title: String,
     rows: Vec<DownloadProgress>,
     done: usize,
     failed: usize,
 }
 
-fn grouped_rows(_downloads: &HashMap<String, DownloadProgress>) -> Vec<RowGroup> {
-    Vec::new()
+/// Rows grouped by batch, or by folder when a row has no batch. Groups go by
+/// title and rows by track, so nothing moves when a row changes state, except
+/// failed and cancelled rows, which sink to the bottom of their group.
+fn grouped_rows(downloads: &HashMap<String, DownloadProgress>) -> Vec<RowGroup> {
+    let mut groups: HashMap<String, RowGroup> = HashMap::new();
+    for row in downloads.values() {
+        let folder = parent_folder(&row.item);
+        let key = match (&row.batch_id, &folder) {
+            (Some(id), _) => format!("batch:{id}"),
+            (None, Some(folder)) => format!("folder:{folder}"),
+            (None, None) => String::new(),
+        };
+        let group = groups.entry(key.clone()).or_insert_with(|| RowGroup {
+            key,
+            title: String::new(),
+            rows: Vec::new(),
+            done: 0,
+            failed: 0,
+        });
+        group.rows.push(row.clone());
+    }
+
+    let mut groups: Vec<RowGroup> = groups
+        .into_values()
+        .map(|mut group| {
+            group.rows.sort_by(|a, b| {
+                is_failed(&a.state)
+                    .cmp(&is_failed(&b.state))
+                    .then_with(|| natural_cmp(file_name(&a.item), file_name(&b.item)))
+                    .then_with(|| a.item.cmp(&b.item))
+            });
+            let first = &group.rows[0];
+            group.title = group
+                .rows
+                .iter()
+                .find_map(|r| r.batch_label.clone())
+                .or_else(|| parent_folder(&first.item))
+                .unwrap_or_else(|| "Other".to_string());
+            group.done = group
+                .rows
+                .iter()
+                .filter(|r| r.state == DownloadState::Imported)
+                .count();
+            group.failed = group.rows.iter().filter(|r| is_failed(&r.state)).count();
+            group
+        })
+        .collect();
+    groups.sort_by(|a, b| {
+        a.title
+            .to_lowercase()
+            .cmp(&b.title.to_lowercase())
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    groups
 }
 
-fn group_summary(_group: &RowGroup) -> String {
-    String::new()
+/// The line under a group's title: how many rows are done, and how many failed.
+fn group_summary(group: &RowGroup) -> String {
+    let mut summary = format!("{}/{} done", group.done, group.rows.len());
+    if group.failed > 0 {
+        summary.push_str(&format!(" · {} failed", group.failed));
+    }
+    summary
 }
 
 #[cfg(test)]

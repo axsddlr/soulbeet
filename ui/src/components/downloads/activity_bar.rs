@@ -88,11 +88,10 @@ fn title_and_folder(row: &DownloadProgress) -> (String, Option<String>) {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| row.item.clone());
-    let folder = row.batch_label.clone().or_else(|| {
-        path.parent()
-            .and_then(|p| p.file_name())
-            .map(|s| s.to_string_lossy().into_owned())
-    });
+    let folder = row
+        .batch_label
+        .clone()
+        .or_else(|| super::parent_folder(&row.item));
     (title, folder)
 }
 
