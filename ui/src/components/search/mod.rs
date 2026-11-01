@@ -609,7 +609,7 @@ pub fn Search() -> Element {
         }
 
         // Search bar
-        div { class: "w-full max-w-4xl space-y-3",
+        div { class: "w-full space-y-3",
 
           div { class: "flex items-center gap-3",
           div { class: "flex-1 min-w-0 flex items-center bg-beet-input rounded-full h-12 md:h-14 pr-2 ring-1 ring-transparent hover:ring-white/20 hover:bg-[#2a2a2a] focus-within:ring-2 focus-within:ring-white transition-all",
@@ -668,7 +668,7 @@ pub fn Search() -> Element {
               }
               SearchTypeToggle { search_type }
               Button {
-                class: if search.read().is_empty() { "ml-1 whitespace-nowrap opacity-80!" } else { "ml-1 whitespace-nowrap" },
+                class: if search.read().is_empty() { "ml-1 h-14 px-8 whitespace-nowrap opacity-80!" } else { "ml-1 h-14 px-8 whitespace-nowrap" },
                 disabled: loading() || search.read().is_empty(),
                 onclick: move |_| {
                     spawn(perform_search());
