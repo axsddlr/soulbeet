@@ -190,6 +190,12 @@ pub fn rank_match(
     // If the album score is below this, we assume the path has no useful album info
     // and we don't penalize the score for it.
     const ALBUM_INFO_THRESHOLD: f64 = 0.25;
+    // At or above this share of the searched artist's words in the path, the
+    // path confirms the artist, and the result is named after the searched
+    // artist instead of the folder or file name that held those words: a
+    // scene release folder ("Artist-Album-(ID)-WEB-FLAC-2021-GRP") holds
+    // every word of the artist and would otherwise become its name.
+    const ARTIST_CONFIRMED_THRESHOLD: f64 = 0.8;
 
     let path_info = PathInfo::from_path(filename);
     let path_folders_c: Vec<_> = path_info
@@ -252,8 +258,13 @@ pub fn rank_match(
         0.0
     };
 
+    let guessed_artist = match searched_artist {
+        Some(artist) if artist_score >= ARTIST_CONFIRMED_THRESHOLD => artist.to_string(),
+        _ => best_artist_guess.original,
+    };
+
     MatchResult {
-        guessed_artist: best_artist_guess.original,
+        guessed_artist,
         guessed_album: best_album_folder.original,
         matched_track: best_track_match.original,
         artist_score,
