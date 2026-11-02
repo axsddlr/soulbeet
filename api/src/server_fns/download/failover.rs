@@ -464,6 +464,11 @@ fn usable_candidates(
     found
 }
 
+/// The query a re-search for `title` by `artist` sends, as logged.
+fn research_query(artist: &str, title: &str) -> String {
+    format!("{artist} {title}")
+}
+
 /// Search for `track` again: by artist and cleaned title (`query_title`),
 /// then by the title alone only when that finds nothing usable. Both
 /// queries keep only candidates by the track's artist. An error from
@@ -486,15 +491,18 @@ async fn research(
         let groups = match finder.search(backend, artist, title).await {
             Ok(groups) => groups,
             Err(e) => {
-                warn!("Re-search for '{} {}' failed: {}", artist, title, e);
+                warn!(
+                    "Re-search for '{}' failed: {}",
+                    research_query(artist, title),
+                    e
+                );
                 return Err(e);
             }
         };
         let found = usable_candidates(track, groups, tried);
         info!(
-            "Re-search for '{} {}' found {} new source(s)",
-            artist,
-            title,
+            "Re-search for '{}' found {} new source(s)",
+            research_query(artist, title),
             found.len()
         );
         if !found.is_empty() {
@@ -2096,6 +2104,122 @@ mod tests {
                 "{id:?} is another recording"
             );
         }
+    }
+
+    /// "NIRVANA" by "Angel + Dren", from a scene release on peer_a.
+    fn scene_track() -> DownloadableItem {
+        by(
+            "Angel + Dren",
+            "peer_a",
+            "NIRVANA",
+            r"@@music\R&B\202109\Angel_Dren-DARK_SUMMER-(190296479991)-16BIT-WEB-FLAC-2021-FDL53WT\02-angel_dren-nirvana_(original_mix).flac",
+        )
+    }
+
+    /// The sources `usable_candidates` keeps for `scene_track` out of
+    /// title-only results, each labelled with a folder guess for its artist.
+    fn scene_usable(ids: &[(&str, &str)]) -> Vec<String> {
+        let items = ids
+            .iter()
+            .map(|(peer, id)| by("Music", peer, "NIRVANA", id))
+            .collect();
+        usable_candidates(&scene_track(), vec![group("mixed", items, 0.9)], &[])
+            .into_iter()
+            .map(|c| c.source)
+            .collect()
+    }
+
+    #[test]
+    fn an_artist_credit_with_a_plus_matches_its_spelled_out_folders() {
+        assert_eq!(normalize_artist("Angel + Dren"), "angel dren");
+        assert_eq!(
+            scene_usable(&[
+                ("peer_b", r"Music\Angel Dren\DARK SUMMER\02 - Nirvana.flac"),
+                ("peer_c", r"music/angel_dren/02 - NIRVANA.mp3"),
+                ("peer_d", r"Music\Other Band\Nirvana.flac"),
+            ]),
+            vec!["peer_b", "peer_c"]
+        );
+    }
+
+    #[test]
+    fn a_scene_named_file_of_the_song_is_accepted() {
+        // "NN-artist-title_(original_mix)": dashes without spaces around
+        // them, and Beatport's name for the one standard mix.
+        assert_eq!(
+            scene_usable(&[
+                (
+                    "peer_b",
+                    r"Music\Angel_Dren-DARK_SUMMER-WEB-2021\02-angel_dren-nirvana_(original_mix).flac",
+                ),
+                (
+                    "peer_c",
+                    r"Music\Angel_Dren-DARK_SUMMER-WEB-2021\03-angel_dren-other_song_(original_mix).flac",
+                ),
+                (
+                    "peer_d",
+                    r"Music\Angel_Dren-DARK_SUMMER-WEB-2021\02-angel_dren-nirvana_(extended_mix).flac",
+                ),
+            ]),
+            vec!["peer_b"]
+        );
+    }
+
+    #[test]
+    fn a_hyphenated_title_keeps_its_dash() {
+        // Only leading dash segments naming a track number, the artist or
+        // the album come off; a dash inside the title stays.
+        let track = by("Kowloon", "peer_a", "X-Ray", "a.flac");
+        let groups = vec![group(
+            "mixed",
+            vec![
+                by("Kowloon", "peer_b", "X-Ray", r"Kowloon\Come Over\04 - X-Ray.flac"),
+                by("Kowloon", "peer_c", "X-Ray", r"Kowloon\Come Over\X-Ray.flac"),
+                by("Kowloon", "peer_d", "X-Ray", r"Kowloon\04-kowloon-x-ray.flac"),
+                by("Kowloon", "peer_e", "X-Ray", r"Kowloon\Come Over\Ray.flac"),
+                by("Kowloon", "peer_f", "X-Ray", r"Kowloon\Come Over\X.flac"),
+            ],
+            0.9,
+        )];
+        let sources: Vec<String> = usable_candidates(&track, groups, &[])
+            .into_iter()
+            .map(|c| c.source)
+            .collect();
+        assert_eq!(sources, vec!["peer_b", "peer_c", "peer_d"]);
+    }
+
+    #[test]
+    fn a_research_query_has_no_space_before_a_title_alone() {
+        assert_eq!(research_query("", "DARK SUMMER"), "DARK SUMMER");
+        assert_eq!(
+            research_query("Angel + Dren", "DARK SUMMER"),
+            "Angel + Dren DARK SUMMER"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scene_release_researches_by_the_artist_credit() {
+        // The title-only query finds the song on another peer.
+        let finder = ScriptedFinder::new(vec![
+            vec![],
+            vec![group(
+                "peer_b",
+                vec![by(
+                    "Music",
+                    "peer_b",
+                    "NIRVANA",
+                    r"Music\Angel Dren\DARK SUMMER\02 - Nirvana.flac",
+                )],
+                0.9,
+            )],
+        ]);
+        let mut pool = SourcePool::single(vec![scene_track()]).with_finder(finder.clone());
+        let stub = StubBackend::new(vec![ScriptedOutcome::Enqueued]);
+        let backend: Arc<dyn DownloadBackend> = stub.clone();
+
+        let queued = pool.enqueue_next(0, &backend, &batch("X")).await;
+        assert_eq!(finder.queries(), vec!["Angel + Dren NIRVANA", "NIRVANA"]);
+        assert_eq!(queued.map(|q| q.source), Some("peer_b".to_string()));
     }
 
     #[test]

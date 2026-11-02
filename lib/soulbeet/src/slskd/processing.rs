@@ -365,4 +365,53 @@ mod tests {
             vec![r"Music\Static Harbor\Glass Atlas\02 - Paper Lanterns.flac"]
         );
     }
+
+    const SCENE_FOLDER: &str = r"@@music\R&B\202109\Angel_Dren-DARK_SUMMER-(190296479991)-16BIT-WEB-FLAC-2021-FDL53WT";
+
+    #[test]
+    fn a_scene_release_is_named_after_the_searched_artist() {
+        // The whole release folder holds every word of the artist, so it used
+        // to become the artist, and a failover re-searched for it by name.
+        let files = [
+            format!(r"{SCENE_FOLDER}\01-angel_dren-dark_summer_(original_mix).flac"),
+            format!(r"{SCENE_FOLDER}\02-angel_dren-nirvana_(original_mix).flac"),
+        ];
+        let responses = [peer("EncolureRandans", &refs(&files))];
+        let albums = process_search_responses(
+            &responses,
+            "Angel + Dren",
+            Some("DARK SUMMER"),
+            &["DARK SUMMER", "NIRVANA"],
+            false,
+            false,
+        );
+
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].artist.as_deref(), Some("Angel + Dren"));
+        assert_eq!(albums[0].tracks.len(), 2);
+        for track in &albums[0].tracks {
+            assert_eq!(track.artist, "Angel + Dren");
+        }
+    }
+
+    #[test]
+    fn a_partly_matched_artist_keeps_the_guess_from_the_path() {
+        // Only one of the three words of the searched credit is in the path:
+        // that does not confirm the artist, so the folder stays the guess.
+        let responses = [peer(
+            "solo",
+            &[r"Music\Kowloon\Come Over\01 - Northern Line.flac"],
+        )];
+        let albums = process_search_responses(
+            &responses,
+            "Kowloon & Static Harbor",
+            Some(ALBUM),
+            &TRACKS,
+            false,
+            false,
+        );
+
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].artist.as_deref(), Some("Kowloon"));
+    }
 }
