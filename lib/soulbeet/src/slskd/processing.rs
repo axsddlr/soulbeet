@@ -366,7 +366,8 @@ mod tests {
         );
     }
 
-    const SCENE_FOLDER: &str = r"@@music\R&B\202109\Angel_Dren-DARK_SUMMER-(190296479991)-16BIT-WEB-FLAC-2021-FDL53WT";
+    const SCENE_FOLDER: &str =
+        r"@@music\R&B\202109\Angel_Dren-DARK_SUMMER-(190296479991)-16BIT-WEB-FLAC-2021-FDL53WT";
 
     #[test]
     fn a_scene_release_is_named_after_the_searched_artist() {

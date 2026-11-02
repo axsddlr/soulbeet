@@ -2181,9 +2181,24 @@ mod tests {
         let groups = vec![group(
             "mixed",
             vec![
-                by("Kowloon", "peer_b", "X-Ray", r"Kowloon\Come Over\04 - X-Ray.flac"),
-                by("Kowloon", "peer_c", "X-Ray", r"Kowloon\Come Over\X-Ray.flac"),
-                by("Kowloon", "peer_d", "X-Ray", r"Kowloon\04-kowloon-x-ray.flac"),
+                by(
+                    "Kowloon",
+                    "peer_b",
+                    "X-Ray",
+                    r"Kowloon\Come Over\04 - X-Ray.flac",
+                ),
+                by(
+                    "Kowloon",
+                    "peer_c",
+                    "X-Ray",
+                    r"Kowloon\Come Over\X-Ray.flac",
+                ),
+                by(
+                    "Kowloon",
+                    "peer_d",
+                    "X-Ray",
+                    r"Kowloon\04-kowloon-x-ray.flac",
+                ),
                 by("Kowloon", "peer_e", "X-Ray", r"Kowloon\Come Over\Ray.flac"),
                 by("Kowloon", "peer_f", "X-Ray", r"Kowloon\Come Over\X.flac"),
             ],
