@@ -102,6 +102,7 @@ const DROPPED_QUALIFIERS: &[&str] = &[
     "deluxe edition",
     "deluxe version",
     "bonus track",
+    "original mix",
 ];
 
 /// Whether `word` is a release year, as in "2011 Remaster" or "(1999)".
@@ -398,7 +399,10 @@ fn file_title_key(track: &DownloadableItem, candidate: &DownloadableItem) -> Str
         normalize_artist(&track.album),
         normalize_artist(&candidate.album),
     ];
-    let segments: Vec<&str> = stem.split(" - ").collect();
+    // Scene releases join their parts with bare dashes ("02-artist-title"):
+    // without a spaced dash, a bare one separates the segments.
+    let separator = if stem.contains(" - ") { " - " } else { "-" };
+    let segments: Vec<&str> = stem.split(separator).collect();
     let mut start = 0;
     while start + 1 < segments.len() {
         let segment = segments[start].trim();
@@ -413,7 +417,7 @@ fn file_title_key(track: &DownloadableItem, candidate: &DownloadableItem) -> Str
         }
         start += 1;
     }
-    title_key(&segments[start..].join(" - "))
+    title_key(&segments[start..].join(separator))
 }
 
 /// Whether `candidate`'s file is the recording `wanted`, `track`'s
@@ -466,7 +470,11 @@ fn usable_candidates(
 
 /// The query a re-search for `title` by `artist` sends, as logged.
 fn research_query(artist: &str, title: &str) -> String {
-    format!("{artist} {title}")
+    if artist.is_empty() {
+        title.to_string()
+    } else {
+        format!("{artist} {title}")
+    }
 }
 
 /// Search for `track` again: by artist and cleaned title (`query_title`),
