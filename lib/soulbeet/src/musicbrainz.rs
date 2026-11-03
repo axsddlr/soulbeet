@@ -362,12 +362,14 @@ fn needs_more_pages(accumulated: usize, last_page_len: usize, total: usize, cap:
 
 /// Sorts newest first by first release date; undated entries go last.
 fn sort_release_groups(groups: &mut [ReleaseGroupSummary]) {
-    groups.sort_by(|a, b| match (&a.first_release_date, &b.first_release_date) {
-        (Some(x), Some(y)) => y.cmp(x),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
-    });
+    groups.sort_by(
+        |a, b| match (&a.first_release_date, &b.first_release_date) {
+            (Some(x), Some(y)) => y.cmp(x),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        },
+    );
 }
 
 fn non_empty(s: &str) -> Option<String> {
