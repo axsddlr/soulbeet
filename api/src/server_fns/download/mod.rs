@@ -29,6 +29,12 @@ use crate::services::download_backend;
 // Local modules
 pub mod auto_download;
 pub use auto_download::{auto_download, AutoDownloadRequest, AutoDownloadResult};
+// For background downloads (artist monitoring), which have no request.
+#[cfg(feature = "server")]
+#[allow(unused_imports)]
+pub(crate) use auto_download::{
+    download_release_for_user, run_album_download, AlbumDownloadJob, AlbumDownloadOutcome,
+};
 
 #[cfg(feature = "server")]
 pub mod enqueue;
