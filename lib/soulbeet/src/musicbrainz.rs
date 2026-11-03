@@ -1,13 +1,16 @@
 use musicbrainz_rs::{
     entity::{
+        artist::{Artist, ArtistSearchQuery},
         artist_credit::ArtistCredit,
         recording::{Recording, RecordingSearchQuery},
         release::{Release, ReleaseStatus},
         release_group::{ReleaseGroup, ReleaseGroupPrimaryType, ReleaseGroupSearchQuery},
     },
-    Fetch, MusicBrainzClient, Search,
+    Browse, Fetch, MusicBrainzClient, Search,
 };
-use shared::metadata::{Album, AlbumWithTracks, SearchResult, Track};
+use shared::metadata::{
+    Album, AlbumWithTracks, ArtistSummary, ReleaseGroupSummary, SearchResult, Track,
+};
 use std::{collections::HashSet, future::Future, sync::OnceLock, time::Duration};
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -297,12 +300,11 @@ pub async fn search(
                     continue;
                 }
 
-                if let Some(best_release) = release_group.releases.as_ref().and_then(|releases| {
-                    releases
-                        .iter()
-                        .filter(|r| r.status == Some(ReleaseStatus::Official))
-                        .min_by_key(|release| release.date.as_ref().map(|d| &d.0))
-                }) {
+                if let Some(best_release) = release_group
+                    .releases
+                    .as_deref()
+                    .and_then(earliest_official_release)
+                {
                     // If no official release was found, take the first one available
                     let final_release = best_release.clone();
 
@@ -320,6 +322,173 @@ pub async fn search(
     }
 
     Ok(results)
+}
+
+/// Picks the release to download from a release group's releases: the
+/// earliest-dated Official one (undated releases sort first, ties keep the
+/// first listed). Shared by album search and artist monitoring.
+fn earliest_official_release(releases: &[Release]) -> Option<&Release> {
+    pick_earliest_official(
+        releases,
+        |r| r.status == Some(ReleaseStatus::Official),
+        |r| r.date.as_ref().map(|d| d.0.as_str()),
+    )
+}
+
+/// Selection rule behind [`earliest_official_release`], independent of the
+/// MusicBrainz entity types so it can be unit tested.
+fn pick_earliest_official<'a, T>(
+    items: &'a [T],
+    is_official: impl Fn(&T) -> bool,
+    date: impl for<'b> Fn(&'b T) -> Option<&'b str>,
+) -> Option<&'a T> {
+    items
+        .iter()
+        .filter(|r| is_official(r))
+        .min_by_key(|r| date(r))
+}
+
+/// Page size for release group browsing (MusicBrainz maximum).
+const BROWSE_PAGE_SIZE: u8 = 100;
+
+/// Upper bound on release groups collected for one artist.
+const MAX_RELEASE_GROUPS: usize = 1000;
+
+/// Whether another browse page is needed, given how many entries have been
+/// accumulated, the size of the page just received and the reported total.
+fn needs_more_pages(accumulated: usize, last_page_len: usize, total: usize, cap: usize) -> bool {
+    last_page_len > 0 && accumulated < total.min(cap)
+}
+
+/// Sorts newest first by first release date; undated entries go last.
+fn sort_release_groups(groups: &mut [ReleaseGroupSummary]) {
+    groups.sort_by(|a, b| match (&a.first_release_date, &b.first_release_date) {
+        (Some(x), Some(y)) => y.cmp(x),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+}
+
+fn non_empty(s: &str) -> Option<String> {
+    (!s.is_empty()).then(|| s.to_string())
+}
+
+fn artist_summary(a: &Artist) -> ArtistSummary {
+    ArtistSummary {
+        mbid: a.id.clone(),
+        name: a.name.clone(),
+        disambiguation: non_empty(&a.disambiguation),
+        country: a.country.as_deref().and_then(non_empty),
+        kind: a.artist_type.as_ref().map(|t| format!("{t:?}")),
+    }
+}
+
+fn release_group_summary(rg: &ReleaseGroup) -> ReleaseGroupSummary {
+    ReleaseGroupSummary {
+        mbid: rg.id.clone(),
+        title: rg.title.clone(),
+        primary_type: rg.primary_type.as_ref().map(|t| match t {
+            ReleaseGroupPrimaryType::Ep => "EP".to_string(),
+            other => format!("{other:?}"),
+        }),
+        secondary_types: rg
+            .secondary_types
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect(),
+        first_release_date: rg.first_release_date.as_ref().and_then(|d| non_empty(&d.0)),
+    }
+}
+
+/// Searches MusicBrainz artists by name.
+pub async fn search_artists(
+    query: &str,
+    limit: u8,
+) -> Result<Vec<ArtistSummary>, musicbrainz_rs::Error> {
+    let client = musicbrainz_client();
+    let results = with_retry("MusicBrainz artist search", || {
+        let search_query = ArtistSearchQuery::query_builder().artist(query).build();
+        async move {
+            Artist::search(search_query)
+                .limit(limit)
+                .execute_with_client(client)
+                .await
+        }
+    })
+    .await?;
+    Ok(results.entities.iter().map(artist_summary).collect())
+}
+
+/// Fetches a single artist by MBID.
+pub async fn get_artist(mbid: &str) -> Result<ArtistSummary, musicbrainz_rs::Error> {
+    let client = musicbrainz_client();
+    let artist = with_retry("MusicBrainz artist fetch", || async {
+        Artist::fetch().id(mbid).execute_with_client(client).await
+    })
+    .await?;
+    Ok(artist_summary(&artist))
+}
+
+/// Lists all Album/EP/Single release groups of an artist, newest first.
+/// Pages through the browse endpoint (100 per page, capped at 1000 entries);
+/// every page is rate limited and retried.
+pub async fn artist_release_groups(
+    artist_mbid: &str,
+) -> Result<Vec<ReleaseGroupSummary>, musicbrainz_rs::Error> {
+    let client = musicbrainz_client();
+    // `by_artist` appends its argument verbatim to the query string, which
+    // lets us add the type filter (%7C is an encoded `|`).
+    let filter = format!("{artist_mbid}&type=album%7Cep%7Csingle");
+    let mut groups: Vec<ReleaseGroupSummary> = Vec::new();
+
+    loop {
+        let offset = groups.len();
+        let page = with_retry("MusicBrainz release group browse", || {
+            let filter = filter.clone();
+            async move {
+                ReleaseGroup::browse()
+                    .by_artist(&filter)
+                    .limit(BROWSE_PAGE_SIZE)
+                    .offset(offset as u16)
+                    .execute_with_client(client)
+                    .await
+            }
+        })
+        .await?;
+
+        let page_len = page.entities.len();
+        groups.extend(page.entities.iter().map(release_group_summary));
+        let total = usize::try_from(page.count).unwrap_or(0);
+        if !needs_more_pages(groups.len(), page_len, total, MAX_RELEASE_GROUPS) {
+            break;
+        }
+    }
+
+    groups.truncate(MAX_RELEASE_GROUPS);
+    sort_release_groups(&mut groups);
+    Ok(groups)
+}
+
+/// The release id to download for a release group (earliest Official
+/// release, same rule as album search), if it has one.
+pub async fn release_group_release(
+    release_group_mbid: &str,
+) -> Result<Option<String>, musicbrainz_rs::Error> {
+    let client = musicbrainz_client();
+    let rg = with_retry("MusicBrainz release group fetch", || async {
+        ReleaseGroup::fetch()
+            .id(release_group_mbid)
+            .with_releases()
+            .execute_with_client(client)
+            .await
+    })
+    .await?;
+    Ok(rg
+        .releases
+        .as_deref()
+        .and_then(earliest_official_release)
+        .map(|r| r.id.clone()))
 }
 
 /// Fetches a release (album) by its ID and returns it with its full tracklist.
@@ -438,5 +607,87 @@ impl crate::MetadataProvider for MusicBrainzProvider {
                 status: 500,
                 message: e.to_string(),
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rg(date: Option<&str>) -> ReleaseGroupSummary {
+        ReleaseGroupSummary {
+            mbid: date.unwrap_or("none").into(),
+            title: "t".into(),
+            primary_type: Some("Album".into()),
+            secondary_types: vec![],
+            first_release_date: date.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn paging_stops_at_total() {
+        assert!(needs_more_pages(100, 100, 250, 1000));
+        assert!(needs_more_pages(200, 100, 250, 1000));
+        assert!(!needs_more_pages(250, 50, 250, 1000));
+        assert!(!needs_more_pages(100, 100, 100, 1000));
+    }
+
+    #[test]
+    fn paging_stops_at_cap() {
+        assert!(needs_more_pages(900, 100, 5000, 1000));
+        assert!(!needs_more_pages(1000, 100, 5000, 1000));
+    }
+
+    #[test]
+    fn paging_stops_on_empty_page() {
+        assert!(!needs_more_pages(100, 0, 500, 1000));
+        assert!(!needs_more_pages(0, 0, 0, 1000));
+    }
+
+    #[test]
+    fn sorts_newest_first_with_undated_last() {
+        let mut v = vec![
+            rg(None),
+            rg(Some("1999-05-01")),
+            rg(Some("2010")),
+            rg(Some("2010-03-04")),
+        ];
+        sort_release_groups(&mut v);
+        let order: Vec<_> = v.iter().map(|g| g.mbid.as_str()).collect();
+        assert_eq!(order, ["2010-03-04", "2010", "1999-05-01", "none"]);
+    }
+
+    // (id, official, date)
+    type R = (&'static str, bool, Option<&'static str>);
+
+    fn pick(items: &[R]) -> Option<&'static str> {
+        pick_earliest_official(items, |r| r.1, |r| r.2).map(|r| r.0)
+    }
+
+    #[test]
+    fn picks_earliest_official_release() {
+        let items: [R; 3] = [
+            ("late", true, Some("2005-01-01")),
+            ("early", true, Some("2001-06-01")),
+            ("bootleg", false, Some("1990-01-01")),
+        ];
+        assert_eq!(pick(&items), Some("early"));
+    }
+
+    #[test]
+    fn release_pick_ignores_unofficial_and_handles_empty() {
+        assert_eq!(pick(&[("promo", false, Some("2000"))]), None);
+        assert_eq!(pick(&[]), None);
+    }
+
+    #[test]
+    fn release_pick_matches_search_rule_for_undated_and_ties() {
+        // Undated sorts before dated; ties keep the first listed.
+        let items: [R; 3] = [
+            ("dated", true, Some("2000")),
+            ("undated", true, None),
+            ("undated2", true, None),
+        ];
+        assert_eq!(pick(&items), Some("undated"));
     }
 }

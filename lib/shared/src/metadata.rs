@@ -95,3 +95,99 @@ pub struct AlbumWithTracks {
     pub album: Album,
     pub tracks: Vec<Track>,
 }
+
+/// A MusicBrainz artist, as shown in artist search results and monitoring.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ArtistSummary {
+    pub mbid: String,
+    pub name: String,
+    pub disambiguation: Option<String>,
+    pub country: Option<String>,
+    /// MusicBrainz artist type, e.g. "Person" or "Group".
+    pub kind: Option<String>,
+}
+
+/// The kinds of release group that artist monitoring surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ReleaseKind {
+    Album,
+    Ep,
+    Single,
+}
+
+/// A MusicBrainz release group listed under an artist.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ReleaseGroupSummary {
+    pub mbid: String,
+    pub title: String,
+    pub primary_type: Option<String>,
+    pub secondary_types: Vec<String>,
+    pub first_release_date: Option<String>,
+}
+
+impl ReleaseGroupSummary {
+    /// The monitorable kind of this release group. `Some` only for a plain
+    /// Album/EP/Single: any secondary type (compilation, live, remix,
+    /// soundtrack, DJ-mix, mixtape, demo, ...) excludes it.
+    pub fn kind(&self) -> Option<ReleaseKind> {
+        if !self.secondary_types.is_empty() {
+            return None;
+        }
+        let primary = self.primary_type.as_deref()?;
+        if primary.eq_ignore_ascii_case("album") {
+            Some(ReleaseKind::Album)
+        } else if primary.eq_ignore_ascii_case("ep") {
+            Some(ReleaseKind::Ep)
+        } else if primary.eq_ignore_ascii_case("single") {
+            Some(ReleaseKind::Single)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod release_group_tests {
+    use super::*;
+
+    fn rg(primary: Option<&str>, secondary: &[&str]) -> ReleaseGroupSummary {
+        ReleaseGroupSummary {
+            mbid: "m".into(),
+            title: "t".into(),
+            primary_type: primary.map(Into::into),
+            secondary_types: secondary.iter().map(|s| s.to_string()).collect(),
+            first_release_date: None,
+        }
+    }
+
+    #[test]
+    fn kind_accepts_album_ep_single_case_insensitively() {
+        assert_eq!(rg(Some("Album"), &[]).kind(), Some(ReleaseKind::Album));
+        assert_eq!(rg(Some("album"), &[]).kind(), Some(ReleaseKind::Album));
+        assert_eq!(rg(Some("EP"), &[]).kind(), Some(ReleaseKind::Ep));
+        assert_eq!(rg(Some("ep"), &[]).kind(), Some(ReleaseKind::Ep));
+        assert_eq!(rg(Some("SINGLE"), &[]).kind(), Some(ReleaseKind::Single));
+    }
+
+    #[test]
+    fn kind_rejects_any_secondary_type() {
+        for s in [
+            "Compilation",
+            "Live",
+            "Remix",
+            "Soundtrack",
+            "DJ-mix",
+            "Mixtape/Street",
+            "Demo",
+        ] {
+            assert_eq!(rg(Some("Album"), &[s]).kind(), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn kind_rejects_other_or_missing_primary() {
+        assert_eq!(rg(Some("Broadcast"), &[]).kind(), None);
+        assert_eq!(rg(Some("Other"), &[]).kind(), None);
+        assert_eq!(rg(None, &[]).kind(), None);
+    }
+}
