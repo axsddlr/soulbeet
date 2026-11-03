@@ -704,8 +704,6 @@ pub(crate) async fn run_album_download(job: AlbumDownloadJob) -> AlbumDownloadOu
 /// user's, else into the user's default download folder. `release_mbid` is
 /// a MusicBrainz release id. Events go to the user's channel, which may
 /// have no subscriber. An `Err` is a reason nothing was started.
-// Artist monitoring calls it; until it lands nothing in this crate does.
-#[allow(dead_code)]
 #[cfg(feature = "server")]
 pub(crate) async fn download_release_for_user(
     user_id: &str,

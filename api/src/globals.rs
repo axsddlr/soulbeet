@@ -22,6 +22,18 @@ const CHANNEL_CLEANUP_INTERVAL_SECS: u64 = 300;
 #[cfg(feature = "server")]
 const CHANNEL_STALE_THRESHOLD_SECS: u64 = 600;
 
+/// Delay after startup before the first artist monitoring pass (2 minutes).
+#[cfg(feature = "server")]
+const ARTIST_MONITOR_STARTUP_DELAY_SECS: u64 = 120;
+
+/// How often artist monitoring looks for follows due a check (30 minutes).
+#[cfg(feature = "server")]
+const ARTIST_MONITOR_INTERVAL_SECS: u64 = 30 * 60;
+
+/// A follow is checked again once its last check is this old (12 hours).
+#[cfg(feature = "server")]
+const ARTIST_MONITOR_RECHECK_HOURS: i64 = 12;
+
 /// Channel info including the sender and cancellation token for cleanup
 #[cfg(feature = "server")]
 pub struct UserChannel {
@@ -266,6 +278,22 @@ pub fn start_channel_cleanup_task() {
             }
         });
         info!("Started automation task (interval: 6h)");
+
+        // Artist monitoring: its own loop, as it covers every user with a
+        // follow, not just Navidrome-connected ones.
+        tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(ARTIST_MONITOR_STARTUP_DELAY_SECS)).await;
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(ARTIST_MONITOR_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+                crate::artist_monitor::run_due_checks(ARTIST_MONITOR_RECHECK_HOURS).await;
+            }
+        });
+        info!(
+            "Started artist monitoring task (interval: {}s, recheck after: {}h)",
+            ARTIST_MONITOR_INTERVAL_SECS, ARTIST_MONITOR_RECHECK_HOURS
+        );
     });
 }
 

@@ -1,3 +1,5 @@
+#[cfg(feature = "server")]
+pub mod artist_monitor;
 pub mod auth;
 pub mod config;
 pub mod crypto;
