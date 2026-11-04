@@ -281,7 +281,8 @@ fn NewReleases() -> Element {
         });
     };
 
-    match &*releases.read() {
+    let binding = releases.read();
+    match &*binding {
         None => rsx! { RowSkeleton { rows: 4 } },
         Some(Err(message)) => rsx! {
             p { class: "text-center text-muted py-8", "{message}" }
@@ -396,7 +397,8 @@ fn FollowingList() -> Element {
         use_resource(move || async move { auth.call(api::list_followed_artists()).await });
     let now = chrono::Utc::now();
 
-    match &*followed.read() {
+    let binding = followed.read();
+    match &*binding {
         None => rsx! { RowSkeleton { rows: 3 } },
         Some(Err(e)) => {
             let message = friendly_error(e);

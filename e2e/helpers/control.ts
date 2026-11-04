@@ -67,3 +67,31 @@ export async function stubState(): Promise<StubState> {
   }
   return (await response.json()) as StubState;
 }
+
+/** A release group the MusicBrainz stub added at runtime. */
+export interface AddedReleaseGroup {
+  releaseGroupMbid: string;
+  releaseMbid: string;
+}
+
+/**
+ * Adds a release group to an artist on the MusicBrainz stub, the monitor
+ * fixture artist unless `artistMbid` says otherwise. /_control/reset drops it.
+ */
+export async function addMbReleaseGroup(group: {
+  title: string;
+  date?: string;
+  primaryType?: 'Album' | 'EP' | 'Single';
+  artistMbid?: string;
+}): Promise<AddedReleaseGroup> {
+  const response = await fetch(`${mbControlUrl}/_control/release-group`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(group),
+  });
+  if (!response.ok) {
+    throw new Error(`control release-group failed: ${response.status} ${await response.text()}`);
+  }
+  const body = (await response.json()) as AddedReleaseGroup & { ok: boolean };
+  return { releaseGroupMbid: body.releaseGroupMbid, releaseMbid: body.releaseMbid };
+}
