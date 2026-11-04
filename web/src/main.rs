@@ -15,7 +15,10 @@ use ui::{
     ActivityBar, AutoDownloadSignal, Downloads, HealthProvider, Layout, Navbar, SearchPrefill,
     SearchReset, SettingsProvider,
 };
-use views::{DashboardPage, LoginPage, SearchPage, SettingsPage, SettingsTab, SettingsTabRequest};
+use views::{
+    ArtistPage, ArtistsPage, DashboardPage, LoginPage, NewReleaseBadge, SearchPage, SettingsPage,
+    SettingsTab, SettingsTabRequest,
+};
 
 mod auth;
 mod views;
@@ -32,6 +35,10 @@ pub enum Route {
         #[layout(WebNavbar)]
             #[route("/")]
             SearchPage {},
+            #[route("/artists")]
+            ArtistsPage {},
+            #[route("/artist/:mbid")]
+            ArtistPage { mbid: String },
             #[route("/dashboard")]
             DashboardPage {},
             #[route("/settings")]
@@ -124,6 +131,19 @@ fn WebNavbar() -> Element {
     let mut auto_download_signal = use_signal(|| None::<shared::download::AutoDownloadEvent>);
     use_context_provider(|| AutoDownloadSignal(auto_download_signal));
 
+    // Fetched once per session; the artists page keeps it current.
+    let mut new_releases = use_signal(|| 0usize);
+    use_context_provider(|| NewReleaseBadge(new_releases));
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(list) = api::list_new_releases().await {
+                new_releases.set(ui::artists::new_count(
+                    list.iter().filter_map(|r| r.release.status.as_deref()),
+                ));
+            }
+        });
+    });
+
     #[cfg(feature = "web")]
     use_resilient_websocket(
         || api::download_updates_ws(WebSocketOptions::new()),
@@ -167,6 +187,16 @@ fn WebNavbar() -> Element {
                         onclick: move |_| search_reset += 1,
                         IconSearch { class: "w-6 h-6 shrink-0" }
                         span { "Search" }
+                    }
+                    Link {
+                        class: SIDEBAR_LINK,
+                        active_class: SIDEBAR_ACTIVE,
+                        to: Route::ArtistsPage {},
+                        span { class: "relative shrink-0",
+                            IconArtists { class: "w-6 h-6" }
+                            NewReleasesBadge { count: new_releases() }
+                        }
+                        span { "data-testid": "nav-artists", "Artists" }
                     }
                     Link {
                         class: SIDEBAR_LINK,
@@ -245,7 +275,7 @@ fn WebNavbar() -> Element {
             }
 
             // Phone tab bar
-            nav { class: "md:hidden relative z-30 grid grid-cols-4 bg-black border-t border-white/5 pb-[env(safe-area-inset-bottom)]",
+            nav { class: "md:hidden relative z-30 grid grid-cols-5 bg-black border-t border-white/5 pb-[env(safe-area-inset-bottom)]",
                 Link {
                     class: TAB_LINK,
                     active_class: TAB_ACTIVE,
@@ -253,6 +283,16 @@ fn WebNavbar() -> Element {
                     onclick: move |_| search_reset += 1,
                     IconSearch { class: "w-6 h-6" }
                     span { "Search" }
+                }
+                Link {
+                    class: TAB_LINK,
+                    active_class: TAB_ACTIVE,
+                    to: Route::ArtistsPage {},
+                    span { class: "relative",
+                        IconArtists { class: "w-6 h-6" }
+                        NewReleasesBadge { count: new_releases() }
+                    }
+                    span { "data-testid": "nav-artists-mobile", "Artists" }
                 }
                 Link {
                     class: TAB_LINK,
@@ -299,6 +339,46 @@ fn DownloadsDot() -> Element {
         span { class: "absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5",
             span { class: "animate-ping absolute inline-flex h-full w-full rounded-full bg-beet-accent opacity-75" }
             span { class: "relative inline-flex rounded-full h-2.5 w-2.5 bg-beet-accent" }
+        }
+    }
+}
+
+/// The count of new releases on the Artists nav item; nothing at zero.
+#[component]
+fn NewReleasesBadge(count: usize) -> Element {
+    if count == 0 {
+        return rsx! {};
+    }
+    let label = if count > 99 {
+        "99+".to_string()
+    } else {
+        count.to_string()
+    };
+    rsx! {
+        span {
+            class: "absolute -top-1.5 -right-2.5 min-w-4 h-4 px-1 rounded-full bg-beet-accent text-black text-[10px] font-bold leading-4 text-center",
+            "data-testid": "nav-artists-badge",
+            "aria-label": "{count} new releases",
+            "{label}"
+        }
+    }
+}
+
+#[component]
+fn IconArtists(class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class,
+            fill: "none",
+            stroke: "currentColor",
+            view_box: "0 0 24 24",
+            stroke_width: "1.5",
+            "aria-hidden": "true",
+            path {
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                d: "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z",
+            }
         }
     }
 }

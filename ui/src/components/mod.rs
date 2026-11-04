@@ -1,4 +1,5 @@
 pub mod album;
+pub mod artists;
 pub mod confirm_modal;
 pub mod cover_art;
 pub mod dashboard;

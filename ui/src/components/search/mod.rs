@@ -40,8 +40,9 @@ use toast::{FallbackToast, FallbackToastData};
 mod search_type_toggle;
 use search_type_toggle::{SearchType, SearchTypeToggle};
 
+/// The search page. `actions` sit beside the title, e.g. a link elsewhere.
 #[component]
-pub fn Search() -> Element {
+pub fn Search(actions: Option<Element>) -> Element {
     let auth = use_auth();
     let mut settings = use_settings();
     let mut search_results = use_signal::<Option<SearchResults>>(|| None);
@@ -597,6 +598,7 @@ pub fn Search() -> Element {
         },
 
         // Title Area
+        div { class: "flex flex-wrap items-end justify-between gap-3",
         div { class: "space-y-2",
           h2 { class: "text-3xl md:text-5xl font-extrabold tracking-tight",
             span { class: "text-white", "Harvest" }
@@ -606,6 +608,8 @@ pub fn Search() -> Element {
           p { class: "text-muted text-sm",
             "Search & Download · Manage Your Library"
           }
+        }
+          {actions}
         }
 
         // Search bar
