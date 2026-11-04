@@ -54,10 +54,11 @@ fn is_upcoming(date: Option<&str>, today: &str) -> bool {
 /// The changes a check makes, given the `stored` releases (by release
 /// group id) and the release groups just `fetched` from MusicBrainz.
 ///
-/// Only plain Albums, EPs and Singles count. On a `baseline` check every
-/// unseen group is Known, and so is an unseen single unless
-/// `include_singles`. Any other unseen group is Upcoming while its first
-/// release date is after `today`, else New. A stored Upcoming group whose
+/// Only plain Albums, EPs and Singles count. An unseen single is Known
+/// unless `include_singles`. Any other unseen group is Upcoming while its
+/// first release date is after `today`, even on a `baseline` check, so an
+/// album announced before the follow still turns up when it comes out.
+/// Otherwise it is Known on a baseline check, else New. A stored Upcoming group whose
 /// date has come becomes New. Nothing else stored is touched, including
 /// groups MusicBrainz no longer lists.
 pub fn plan_check(
@@ -79,10 +80,12 @@ pub fn plan_check(
         let date = group.first_release_date.as_deref();
         match stored.get(&group.mbid) {
             None => {
-                let status = if baseline || (kind == ReleaseKind::Single && !include_singles) {
+                let status = if kind == ReleaseKind::Single && !include_singles {
                     ReleaseStatus::Known
                 } else if is_upcoming(date, today) {
                     ReleaseStatus::Upcoming
+                } else if baseline {
+                    ReleaseStatus::Known
                 } else {
                     ReleaseStatus::New
                 };
@@ -170,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_marks_everything_known() {
+    fn baseline_marks_released_groups_known_and_announced_ones_upcoming() {
         let fetched = [
             rg("a", "Album", &[], Some("2020-01-01")),
             rg("b", "EP", &[], Some("2099-01-01")),
@@ -181,7 +184,7 @@ mod tests {
             inserted(&changes),
             ids(&[
                 ("a", ReleaseStatus::Known),
-                ("b", ReleaseStatus::Known),
+                ("b", ReleaseStatus::Upcoming),
                 ("c", ReleaseStatus::Known),
             ])
         );

@@ -105,12 +105,16 @@ async fn a_baseline_check_stores_known_and_downloads_nothing() {
     assert_eq!(
         summary,
         CheckSummary {
-            added_known: 2,
+            added_known: 1,
+            added_upcoming: 1,
             ..CheckSummary::default()
         }
     );
     assert_eq!(status_of(&pool, "u1", "rg1").await.0, ReleaseStatus::Known);
-    assert_eq!(status_of(&pool, "u1", "rg2").await.0, ReleaseStatus::Known);
+    assert_eq!(
+        status_of(&pool, "u1", "rg2").await.0,
+        ReleaseStatus::Upcoming
+    );
     assert!(ArtistRelease::get(&pool, "u1", "live")
         .await
         .unwrap()

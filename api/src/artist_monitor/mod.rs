@@ -109,7 +109,9 @@ impl RunningGuard {
     fn acquire(user_id: &str, artist_mbid: &str) -> Option<RunningGuard> {
         let key = (user_id.to_string(), artist_mbid.to_string());
         let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
-        running.insert(key.clone()).then_some(RunningGuard { key })
+        // `then`, not `then_some`: a guard built eagerly on the busy path would
+        // drop here, while `running` is locked, and deadlock in `Drop`.
+        running.insert(key.clone()).then(|| RunningGuard { key })
     }
 }
 
