@@ -362,7 +362,10 @@ mod logic {
 }
 
 /// Search MusicBrainz for artists by name.
-#[get("/api/artists/search", auth: AuthSession)]
+///
+/// POST because the arguments travel in the body: a browser GET cannot carry
+/// one, so the call would fail before reaching the server.
+#[post("/api/artists/search", auth: AuthSession)]
 pub async fn search_artists(query: String) -> Result<Vec<ArtistSummary>, ServerFnError> {
     #[cfg(feature = "server")]
     {
@@ -383,7 +386,7 @@ pub async fn search_artists(query: String) -> Result<Vec<ArtistSummary>, ServerF
 }
 
 /// An artist with their releases, merged with what the user's follow tracks.
-#[get("/api/artists/page", auth: AuthSession)]
+#[post("/api/artists/page", auth: AuthSession)]
 pub async fn get_artist_page(mbid: String) -> Result<ArtistPage, ServerFnError> {
     #[cfg(feature = "server")]
     {
