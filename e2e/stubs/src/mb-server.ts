@@ -12,6 +12,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   findRecording,
   findRelease,
+  monitorArtistMbid,
+  monitorArtistName,
+  monitorReleases,
   releases,
   type FixtureRelease,
   type FixtureTrack,
@@ -35,8 +38,11 @@ export class MbControl {
   latencyMs = 0;
   /** paths beets asked for since the last reset, oldest first */
   requests: string[] = [];
+  /** release groups added at runtime through /_control/release-group */
+  added: FixtureRelease[] = [];
 
   reset(): void {
+    this.added = [];
     this.mode = 'normal';
     this.latencyMs = 0;
     this.requests = [];
@@ -196,7 +202,7 @@ function releaseJson(release: FixtureRelease): Record<string, unknown> {
       title: release.title,
       'primary-type': release.primaryType,
       'first-release-date': release.date,
-      'secondary-types': [],
+      'secondary-types': release.secondaryTypes ?? [],
       disambiguation: '',
     },
   };
@@ -225,13 +231,96 @@ function releaseGroupJson(release: FixtureRelease): Record<string, unknown> {
     id: release.releaseGroupMbid,
     title: release.title,
     'primary-type': release.primaryType,
-    'secondary-types': [],
+    'secondary-types': release.secondaryTypes ?? [],
     'first-release-date': release.date,
     disambiguation: '',
     'artist-credit': artistCreditJson(release),
     releases: [releaseJson(release)],
     rating: { 'votes-count': 12, value: release.rating / 20 },
     score: 100,
+  };
+}
+
+// ---- artist monitoring ----------------------------------------------------------
+
+interface FixtureArtist {
+  id: string;
+  name: string;
+}
+
+/** Everything the stub knows about, including groups added at runtime. */
+function catalog(control: MbControl): FixtureRelease[] {
+  return [...releases, ...monitorReleases, ...control.added];
+}
+
+function artists(control: MbControl): FixtureArtist[] {
+  const byId = new Map<string, FixtureArtist>();
+  for (const release of catalog(control)) {
+    byId.set(release.artistMbid, { id: release.artistMbid, name: release.artist });
+  }
+  byId.set(monitorArtistMbid, { id: monitorArtistMbid, name: monitorArtistName });
+  return [...byId.values()];
+}
+
+function artistJson(artist: FixtureArtist): Record<string, unknown> {
+  return {
+    id: artist.id,
+    name: artist.name,
+    'sort-name': artist.name,
+    disambiguation: '',
+    country: 'XW',
+    type: 'Group',
+    'type-id': 'e431f5f6-b5d2-343d-8b36-72607fffb74b',
+    score: 100,
+  };
+}
+
+function searchArtists(control: MbControl, query: string): FixtureArtist[] {
+  const { fields, freeText } = parseLucene(query);
+  const name = fields.get('artist') ?? fields.get('artistname') ?? fields.get('name');
+  const free = freeText.join(' ');
+  if (name === undefined && free.length === 0) {
+    return [];
+  }
+  return artists(control).filter(
+    (artist) =>
+      matchesText(artist.name, name) && (name !== undefined || matchesText(artist.name, free)),
+  );
+}
+
+function browseReleaseGroups(control: MbControl, url: URL): Record<string, unknown> {
+  const artistMbid = url.searchParams.get('artist') ?? '';
+  const types = (url.searchParams.get('type') ?? '')
+    .split('|')
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t.length > 0);
+  const limitParam = Number(url.searchParams.get('limit') ?? '25');
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 25;
+  const offsetParam = Number(url.searchParams.get('offset') ?? '0');
+  const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+
+  const groups = new Map<string, FixtureRelease>();
+  for (const release of catalog(control)) {
+    if (
+      release.artistMbid === artistMbid &&
+      (types.length === 0 || types.includes(release.primaryType.toLowerCase()))
+    ) {
+      groups.set(release.releaseGroupMbid, release);
+    }
+  }
+  const sorted = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date));
+  console.log(`[mb] release-group browse artist ${artistMbid} -> ${sorted.length}`);
+  return {
+    'release-group-count': sorted.length,
+    'release-group-offset': offset,
+    'release-groups': sorted.slice(offset, offset + limit).map((r) => ({
+      id: r.releaseGroupMbid,
+      title: r.title,
+      'primary-type': r.primaryType,
+      'secondary-types': r.secondaryTypes ?? [],
+      'first-release-date': r.date,
+      disambiguation: '',
+    })),
   };
 }
 
@@ -341,6 +430,10 @@ export function createMusicBrainzServer(control: MbControl): Server {
         method: 'GET',
         pattern: '/ws/2/release-group',
         handler: served(control, ({ res, url }) => {
+          if (url.searchParams.has('artist')) {
+            sendJson(res, 200, browseReleaseGroups(control, url));
+            return;
+          }
           const query = url.searchParams.get('query') ?? '';
           const found = searchReleaseGroups(query).sort((a, b) => b.rating - a.rating);
           console.log(`[mb] release-group search "${query}" -> ${found.length}`);
@@ -354,9 +447,56 @@ export function createMusicBrainzServer(control: MbControl): Server {
       },
       {
         method: 'GET',
+        pattern: '/ws/2/release-group/:id',
+        handler: served(control, ({ res, params }) => {
+          const id = params.id as string;
+          const group = catalog(control).filter((r) => r.releaseGroupMbid === id);
+          console.log(`[mb] release-group lookup ${id} -> ${group.length > 0 ? 'hit' : 'miss'}`);
+          const first = group[0];
+          if (!first) {
+            sendJson(res, 404, { error: 'Not Found' });
+            return;
+          }
+          sendJson(res, 200, { ...releaseGroupJson(first), releases: group.map(releaseJson) });
+        }),
+      },
+      {
+        method: 'GET',
+        pattern: '/ws/2/artist',
+        handler: served(control, ({ res, url }) => {
+          const query = url.searchParams.get('query') ?? '';
+          const limitParam = Number(url.searchParams.get('limit') ?? '25');
+          const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 25;
+          const found = searchArtists(control, query);
+          console.log(`[mb] artist search "${query}" -> ${found.length}`);
+          sendJson(res, 200, {
+            created: new Date().toISOString(),
+            count: found.length,
+            offset: 0,
+            artists: found.slice(0, limit).map(artistJson),
+          });
+        }),
+      },
+      {
+        method: 'GET',
+        pattern: '/ws/2/artist/:id',
+        handler: served(control, ({ res, params }) => {
+          const artist = artists(control).find((a) => a.id === params.id);
+          console.log(`[mb] artist lookup ${params.id} -> ${artist ? 'hit' : 'miss'}`);
+          if (!artist) {
+            sendJson(res, 404, { error: 'Not Found' });
+            return;
+          }
+          sendJson(res, 200, artistJson(artist));
+        }),
+      },
+      {
+        method: 'GET',
         pattern: '/ws/2/release/:id',
         handler: served(control, ({ res, params }, weak) => {
-          const release = findRelease(params.id as string);
+          const release =
+            findRelease(params.id as string) ??
+            control.added.find((r) => r.releaseMbid === params.id);
           console.log(`[mb] release lookup ${params.id} -> ${release ? 'hit' : 'miss'}`);
           if (!release) {
             sendJson(res, 404, { error: 'Not Found' });
@@ -396,6 +536,66 @@ export function createMusicBrainzServer(control: MbControl): Server {
         pattern: '/_control/requests',
         handler: ({ res }) => {
           sendJson(res, 200, control.requests);
+        },
+      },
+      {
+        // Simulates "a new release group appeared" for an artist.
+        method: 'POST',
+        pattern: '/_control/release-group',
+        handler: ({ res, body }) => {
+          const request = (body ?? {}) as Record<string, unknown>;
+          const title = request.title;
+          if (typeof title !== 'string' || title.length === 0) {
+            sendJson(res, 400, { error: 'title is required' });
+            return;
+          }
+          const artistMbid =
+            typeof request.artistMbid === 'string' ? request.artistMbid : monitorArtistMbid;
+          const artist = artists(control).find((a) => a.id === artistMbid);
+          if (!artist) {
+            sendJson(res, 400, { error: `unknown artistMbid ${artistMbid}` });
+            return;
+          }
+          const primaryType = (request.primaryType ?? 'Album') as FixtureRelease['primaryType'];
+          if (!['Album', 'EP', 'Single'].includes(primaryType)) {
+            sendJson(res, 400, { error: 'primaryType must be Album, EP or Single' });
+            return;
+          }
+          const n = control.added.length + 1;
+          const hex = (value: number, width: number): string =>
+            value.toString(16).padStart(width, '0');
+          const release: FixtureRelease = {
+            releaseMbid:
+              typeof request.releaseMbid === 'string'
+                ? request.releaseMbid
+                : `${hex(0xadde0000 + n, 8)}-aaaa-4a5b-8c6d-7e8f9a0b1c2d`,
+            releaseGroupMbid:
+              typeof request.releaseGroupMbid === 'string'
+                ? request.releaseGroupMbid
+                : `${hex(0xadde1000 + n, 8)}-bbbb-4a5b-8c6d-7e8f9a0b1c2d`,
+            title,
+            artist: artist.name,
+            artistMbid: artist.id,
+            date: typeof request.date === 'string' ? request.date : '2024-01-01',
+            primaryType,
+            secondaryTypes: Array.isArray(request.secondaryTypes)
+              ? request.secondaryTypes.filter((t): t is string => typeof t === 'string')
+              : [],
+            rating: 50,
+            tracks: [1, 2].map((position) => ({
+              mbid: `${hex(0xadde2000 + n * 10 + position, 8)}-cccc-4a5b-8c6d-7e8f9a0b1c2d`,
+              title: `${title} Track ${position}`,
+              position,
+              lengthMs: 30000,
+            })),
+          };
+          control.added.push(release);
+          console.log(`[mb] added release group "${title}" to ${artist.name}`);
+          sendJson(res, 200, {
+            ok: true,
+            releaseGroupMbid: release.releaseGroupMbid,
+            releaseMbid: release.releaseMbid,
+          });
         },
       },
       {

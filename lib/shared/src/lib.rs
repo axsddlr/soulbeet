@@ -1,3 +1,4 @@
+pub mod artists;
 pub mod download;
 pub mod library;
 pub mod metadata;

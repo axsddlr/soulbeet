@@ -19,7 +19,9 @@ export interface FixtureRelease {
   artistMbid: string;
   /** YYYY-MM-DD */
   date: string;
-  primaryType: 'Album' | 'Single';
+  primaryType: 'Album' | 'Single' | 'EP';
+  /** MusicBrainz secondary types, e.g. Live or Compilation */
+  secondaryTypes?: string[];
   /** 0-100, drives result ordering in the app (sorted by rating) */
   rating: number;
   tracks: FixtureTrack[];
@@ -460,8 +462,57 @@ export const releases: FixtureRelease[] = [
   bellwether,
 ];
 
+// ---- artist monitoring -------------------------------------------------------
+// Used only by the monitoring specs. Kept out of `releases` so the recording
+// and release-group searches, the slskd shares and the audio fixtures never
+// see it; the MusicBrainz stub serves it through artist lookup, release-group
+// browse and release lookup.
+
+export const monitorArtistName = 'Monitor Test Artist';
+export const monitorArtistMbid = '9d8c7b6a-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+
+function monitorRelease(
+  n: number,
+  title: string,
+  primaryType: FixtureRelease['primaryType'],
+  date: string,
+  secondaryTypes: string[] = [],
+): FixtureRelease {
+  const hex = (value: number, width: number): string => value.toString(16).padStart(width, '0');
+  return {
+    releaseMbid: `${hex(0xc0de0000 + n, 8)}-aaaa-4a5b-8c6d-7e8f9a0b1c2d`,
+    releaseGroupMbid: `${hex(0xc0de1000 + n, 8)}-bbbb-4a5b-8c6d-7e8f9a0b1c2d`,
+    title,
+    artist: monitorArtistName,
+    artistMbid: monitorArtistMbid,
+    date,
+    primaryType,
+    secondaryTypes,
+    rating: 50,
+    tracks: [1, 2].map((position) => ({
+      mbid: `${hex(0xc0de2000 + n * 10 + position, 8)}-cccc-4a5b-8c6d-7e8f9a0b1c2d`,
+      title: `${title} Track ${position}`,
+      position,
+      lengthMs: 30000,
+    })),
+  };
+}
+
+export const monitorReleases: FixtureRelease[] = [
+  monitorRelease(1, 'Monitor First Album', 'Album', '2015-03-06'),
+  monitorRelease(2, 'Monitor Second Album', 'Album', '2018-09-14'),
+  monitorRelease(3, 'Monitor Short EP', 'EP', '2019-06-21'),
+  monitorRelease(4, 'Monitor Lone Single', 'Single', '2020-02-07'),
+  monitorRelease(5, 'Monitor Live Session', 'Album', '2021-10-01', ['Live']),
+  monitorRelease(6, 'Monitor Best Of', 'Album', '2022-05-13', ['Compilation']),
+  monitorRelease(7, 'Monitor Future Album', 'Album', '2099-01-01'),
+];
+
 export function findRelease(releaseMbid: string): FixtureRelease | undefined {
-  return releases.find((r) => r.releaseMbid === releaseMbid);
+  return (
+    releases.find((r) => r.releaseMbid === releaseMbid) ??
+    monitorReleases.find((r) => r.releaseMbid === releaseMbid)
+  );
 }
 
 export function findRecording(

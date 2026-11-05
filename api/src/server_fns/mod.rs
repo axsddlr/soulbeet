@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+pub mod artists;
 pub mod auth;
 pub mod discovery;
 pub mod download;
@@ -11,6 +12,7 @@ pub mod settings;
 pub mod system;
 pub mod user;
 
+pub use artists::*;
 pub use auth::*;
 pub use discovery::*;
 pub use download::*;
