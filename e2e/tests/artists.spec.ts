@@ -107,7 +107,7 @@ test('follows an artist and picks up a newly announced release', async ({ contex
   await expect(row).toContainText(title);
   await expect(row).toContainText(monitorArtistName);
   await expect(row.getByTestId('status-chip')).toHaveText('New');
-  await expect(page.getByTestId('nav-artists-badge')).toHaveText('1');
+  await expect(page.getByTestId('nav-artists-badge').filter({ visible: true })).toHaveText('1');
   await expect(newReleaseRow(page, futureAlbum).getByTestId('status-chip')).toHaveText(
     'Upcoming',
   );
